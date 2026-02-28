@@ -1,16 +1,9 @@
-export interface Run {
-  text: string;
-  style?: Record<string, unknown>;
-}
-
-export interface Paragraph {
-  runs: Run[];
-}
+import type { JSONContent } from "@tiptap/core";
 
 export interface EditorDocument {
   id?: string;
   title: string;
-  content: Paragraph[];
+  content: JSONContent;
   created_at?: string;
   updated_at?: string;
 }
