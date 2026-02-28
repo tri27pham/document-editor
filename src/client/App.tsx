@@ -7,7 +7,7 @@ export function App() {
     <div className="app">
       <Toolbar />
       <div className="editor-container">
-        <PageOverlay pageCount={1} />
+        <PageOverlay pageCount={3} />
         <Editor />
       </div>
     </div>
