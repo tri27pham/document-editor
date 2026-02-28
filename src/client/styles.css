@@ -92,6 +92,11 @@ body {
   font-family: monospace;
 }
 
+.toolbar-error {
+  font-size: 13px;
+  color: #c00;
+}
+
 /* --- Editor Container (the "paper") --- */
 
 .editor-container {
