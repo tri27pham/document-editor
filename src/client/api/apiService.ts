@@ -1,11 +1,11 @@
-import type { EditorDocument } from "../../shared/types";
+import type { JSONContent } from "@tiptap/core";
 
 const API_BASE = "http://localhost:3001";
 
 export async function saveDocument(params: {
   id?: string;
   title?: string;
-  content?: EditorDocument["content"];
+  content?: JSONContent;
 }): Promise<unknown> {
   const { id, title, content } = params;
   const res = await fetch(`${API_BASE}/documents`, {

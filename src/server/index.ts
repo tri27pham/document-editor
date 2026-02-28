@@ -17,7 +17,7 @@ app.post("/documents", (req, res) => {
     title?: string;
     content?: EditorDocument["content"];
   };
-  if (title === undefined || !Array.isArray(content)) {
+  if (title === undefined || content === undefined) {
     res.status(400).json({ error: "Missing or invalid title or content" });
     return;
   }

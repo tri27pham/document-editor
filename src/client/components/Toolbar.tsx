@@ -1,29 +1,69 @@
 import { useState } from "react";
+import { useCurrentEditor } from "@tiptap/react";
+import { saveDocument, load } from "../api/apiService";
 
 export function Toolbar() {
+  const { editor } = useCurrentEditor();
   const [documentId, setDocumentId] = useState<string>("");
   const [loadId, setLoadId] = useState<string>("");
+  const [title, setTitle] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
 
-  function handleSave() {
-    // TODO: call save API, set documentId from response
+  async function handleSave() {
+    if (!editor) return;
+    setError(null);
+    try {
+      const json = editor.getJSON();
+      const res = (await saveDocument({
+        id: documentId || undefined,
+        title: title || "Untitled",
+        content: json,
+      })) as { id: string };
+      setDocumentId(res.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Save failed");
+    }
   }
 
-  function handleLoad() {
-    // TODO: call load API with loadId, set editor content
+  async function handleLoad() {
+    if (!editor || !loadId.trim()) return;
+    setError(null);
+    try {
+      const doc = (await load(loadId.trim())) as {
+        title?: string;
+        content?: unknown;
+      };
+      if (doc.title != null) setTitle(String(doc.title));
+      if (doc.content != null) editor.commands.setContent(doc.content);
+      setDocumentId(loadId.trim());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Load failed");
+    }
   }
 
   return (
     <div className="toolbar">
-      <button onClick={handleSave}>Save</button>
+      <button onClick={handleSave} disabled={!editor}>
+        Save
+      </button>
       <span className="toolbar-divider" />
       <input
         type="text"
-        placeholder="Document ID"
+        placeholder="Document Title"
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+      />
+      <input
+        type="text"
+        placeholder="Load by ID"
         value={loadId}
         onChange={(e) => setLoadId(e.target.value)}
       />
-      <button onClick={handleLoad}>Load</button>
+      <button onClick={handleLoad} disabled={!editor || !loadId.trim()}>
+        Load
+      </button>
       {documentId && <span className="toolbar-id">ID: {documentId}</span>}
+      {error && <span className="toolbar-error">{error}</span>}
     </div>
   );
 }

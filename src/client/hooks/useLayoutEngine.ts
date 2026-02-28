@@ -1,25 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { useEditor, EditorContent } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
+import type { Editor } from "@tiptap/core";
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { measureParagraphs, computeLayout } from "../engine/layout";
 import { CONTENT_HEIGHT } from "../../shared/constants";
-import { LayoutPlugin } from "../extensions/layoutPlugin";
-import { PageOverlay } from "./PageOverlay";
-import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 
 /**
- * Layout is scheduled with requestAnimationFrame so it runs on the next frame
- * (~16ms) after the last edit, reducing visible delay before page-break margins appear.
- * Rapid edits still batch into a single layout per frame.
+ * Custom hook that runs the layout engine: measures paragraphs, computes page breaks,
+ * dispatches LayoutResult to the plugin, and exposes pageCount.
+ * Uses requestAnimationFrame for scheduling and gates the first run on document.fonts.ready.
  */
-export function Editor() {
+export function useLayoutEngine(editor: Editor | null): number {
   const [pageCount, setPageCount] = useState(1);
-
-  const editor = useEditor({
-    extensions: [StarterKit, LayoutPlugin],
-    content: "<p>Start typing…</p>",
-  });
-
   const layoutRafRef = useRef<number | null>(null);
   const firstLayoutDoneRef = useRef(false);
   const lastLayoutDocRef = useRef<ProseMirrorNode | null>(null);
@@ -64,10 +55,5 @@ export function Editor() {
     };
   }, [editor]);
 
-  return (
-    <>
-      <PageOverlay pageCount={pageCount} />
-      <EditorContent editor={editor} className="editor" />
-    </>
-  );
+  return pageCount;
 }
