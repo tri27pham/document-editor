@@ -146,7 +146,7 @@ body {
 }
 
 .ProseMirror p {
-  margin-bottom: 0.5em;
+  margin-bottom: var(--paragraph-spacing, 8px);
 }
 
 .ProseMirror:focus {

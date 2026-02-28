@@ -1,15 +1,74 @@
-import type { LayoutResult } from "../../shared/types";
+import type { Editor } from "@tiptap/core";
+import type { LayoutResult, PageStartPosition } from "../../shared/types";
+import { PARAGRAPH_SPACING } from "../../shared/constants";
+
+export interface ParagraphMeasurement {
+  height: number;
+  pmPos: number;
+}
+
+/**
+ * Walk editor.state.doc in lockstep with the live DOM to collect
+ * getBoundingClientRect().height and the ProseMirror offset for each
+ * top-level node. The offset from doc.forEach is the position needed
+ * later for Decoration.node(from, to, …).
+ */
+export function measureParagraphs(editor: Editor): ParagraphMeasurement[] {
+  const { doc } = editor.state;
+  const { view } = editor;
+  const measurements: ParagraphMeasurement[] = [];
+
+  doc.forEach((node, offset) => {
+    const dom = view.nodeDOM(offset);
+    if (dom instanceof HTMLElement) {
+      measurements.push({
+        height: dom.getBoundingClientRect().height,
+        pmPos: offset,
+      });
+    }
+  });
+
+  return measurements;
+}
 
 /**
  * Pure layout function: reads paragraph measurements, returns page break positions.
- *
- * Pass 1: batch-read paragraph heights from dirty point onwards.
- * Pass 2: line-level measurement on boundary paragraphs only.
+ * Whole-paragraph pushing (V1): when a paragraph doesn't fit on the current page,
+ * the entire paragraph moves to the next page. Straddling paragraphs are logged
+ * as candidates for future mid-paragraph splitting.
+ * Paragraph spacing (PARAGRAPH_SPACING constant) is included so each paragraph reserves height + gap.
  */
 export function computeLayout(
-  _paragraphHeights: number[],
-  _contentHeight: number
+  measurements: ParagraphMeasurement[],
+  contentHeight: number
 ): LayoutResult {
-  // TODO: implement pagination algorithm
-  return { pageBreaks: [], textStartY: [0], pageCount: 1 };
+  let pageCount = 1;
+  let accumulatedHeightOnCurrentPage = 0;
+  const pageStartPositions: PageStartPosition[] = [];
+
+  for (const p of measurements) {
+    const remainingOnPage = contentHeight - accumulatedHeightOnCurrentPage;
+    const spaceNeeded = p.height + PARAGRAPH_SPACING;
+
+    if (spaceNeeded > remainingOnPage) {
+      if (p.height > remainingOnPage) {
+        console.log("[layout] Straddling paragraph (candidate for mid-paragraph split):", {
+          pmPos: p.pmPos,
+          height: p.height,
+          remainingOnPage,
+        });
+      }
+      pageStartPositions.push({
+        proseMirrorPos: p.pmPos,
+        pageNumber: pageCount + 1,
+        remainingSpace: remainingOnPage,
+      });
+      pageCount += 1;
+      accumulatedHeightOnCurrentPage = p.height + PARAGRAPH_SPACING;
+    } else {
+      accumulatedHeightOnCurrentPage += p.height + PARAGRAPH_SPACING;
+    }
+  }
+
+  return { pageCount, pageStartPositions };
 }

@@ -15,8 +15,13 @@ export interface EditorDocument {
   updated_at?: string;
 }
 
+export interface PageStartPosition {
+  proseMirrorPos: number;
+  pageNumber: number;
+  remainingSpace: number;
+}
+
 export interface LayoutResult {
-  pageBreaks: number[];
-  textStartY: number[];
   pageCount: number;
+  pageStartPositions: PageStartPosition[];
 }
