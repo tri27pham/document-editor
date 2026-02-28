@@ -1,8 +1,4 @@
-export interface LayoutResult {
-  pageBreaks: number[];
-  textStartY: number[];
-  pageCount: number;
-}
+import type { LayoutResult } from "../../shared/types";
 
 /**
  * Pure layout function: reads paragraph measurements, returns page break positions.

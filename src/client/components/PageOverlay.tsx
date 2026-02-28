@@ -1,4 +1,4 @@
-import { PAGE_WIDTH, PAGE_HEIGHT } from "../constants/layout";
+import { PAGE_WIDTH, PAGE_HEIGHT } from "../../shared/constants";
 
 interface PageOverlayProps {
   pageCount: number;
