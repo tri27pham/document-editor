@@ -70,7 +70,7 @@ Follow `docs/IMPLEMENTATION_PLAN.md` for the build order. Key sequencing:
 
 - **Phases 0–1:** Scaffold + shared types/constants (foundation)
 - **Phases 2–5:** Editor → layout engine → decorations → overlays (core pagination)
-- **Phases 6–7:** Backend API → serialisation + save/load UI (persistence)
+- **Phases 6–7:** Backend API → save/load UI (persistence)
 - **Phase 8:** Polish and edge cases
 - **Phase 9:** Documentation (README, ARCHITECTURE.md, AI_USAGE.md)
 - **V1 checkpoint:** All 4 acceptance criteria must pass before proceeding

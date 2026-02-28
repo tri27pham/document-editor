@@ -41,7 +41,7 @@ Remaining buffer for debugging, polish, and documentation: 2–6 hours of the 24
 
 - [ ] `shared/constants.ts` — all layout constants from the PRD (PAGE_WIDTH, PAGE_HEIGHT, margins, CONTENT_HEIGHT, PAGE_GAP, PARAGRAPH_SPACING).
 - [ ] `shared/types.ts`:
-  - `EditorDocument`, `Paragraph`, `Run` — document model types. Named `EditorDocument` to avoid shadowing the global DOM `Document` interface.
+  - `EditorDocument` — `id`, `title`, `content` (TipTap `JSONContent`), `created_at`, `updated_at`. Named `EditorDocument` to avoid shadowing the global DOM `Document` interface.
   - `LayoutResult` interface:
     ```typescript
     interface LayoutResult {
@@ -136,18 +136,15 @@ Remaining buffer for debugging, polish, and documentation: 2–6 hours of the 24
 
 ---
 
-## Phase 7: Serialisation + Save/Load UI (2–2.5h)
+## Phase 7: Save/Load UI (1–1.5h)
 
-**Goal:** Save and load documents through the UI with clean round-trip fidelity.
+**Goal:** Save and load documents through the UI with correct round-trip fidelity. No custom serialisation: content is TipTap JSON throughout.
 
-- [ ] **Serialiser:** Convert `editor.getJSON()` → your `EditorDocument` model format. TipTap paragraph nodes → `Paragraph`, text nodes with marks → `Run`. Decorations are not in `getJSON()` so no stripping needed.
-- [ ] **Deserialiser:** Your `EditorDocument` model → TipTap node format, passed to `editor.commands.setContent()`.
-- [ ] **Save button:** Serialise current editor state, POST to backend, display returned ID to user.
-- [ ] **Load input:** Text field for document ID, fetches from backend, deserialises into editor, triggers layout recalculation.
-- [ ] Gate the post-load layout pass on `document.fonts.ready` to ensure deterministic pagination.
+- [ ] **Save button:** Get current state via `editor.getJSON()`, POST `{ title, content }` to backend, display returned ID to user.
+- [ ] **Load input:** Text field for document ID, GET from backend, call `editor.commands.setContent(doc.content)` with the returned `content`. Layout recalculates on the next update (already gated on `document.fonts.ready` for first run).
 - [ ] **Verify the critical path:** Type content across 3+ pages → Save → note the ID → hard refresh the browser → Load by ID → content structure and pagination match.
 
-**This is the most important phase to test thoroughly.** AC-3 is a hard acceptance criterion tested during the live review. Any lossy transformation in the round-trip (whitespace, paragraph order, run boundaries) will be visible.
+AC-3 is tested during the live review. Save/load use the same JSON format; no transformation means no lossy round-trip.
 
 ---
 
@@ -214,12 +211,12 @@ At this point all four acceptance criteria should pass. **Do not proceed to para
 - [ ] Handle cascading splits: a paragraph spanning 3+ pages produces multiple splits. The layout pass runs iteratively until no paragraph overflows. This converges because splits only make paragraphs shorter.
 - [ ] Verify: type a long paragraph across a page boundary (splits). Delete content above it so it fits on one page (merges back). Undo/redo still works correctly from the user's perspective.
 
-### 10d: Serialisation Merge (0.5–1h)
+### 10d: Merge on Save (0.5–1h)
 
-- [ ] On save, walk the document tree and detect `continuedFrom` pairs. Merge them back into single paragraphs before serialising to the `EditorDocument` model.
+- [ ] On save, walk the document tree and detect `continuedFrom` pairs. Merge them back into single paragraphs before sending to the API.
 - [ ] The persisted document never contains artificial splits.
-- [ ] On load, the layout engine computes fresh splits from the flat document model.
-- [ ] Verify the round-trip: save a document with split paragraphs → load → paragraphs are merged in the persisted model → layout engine re-splits them correctly → identical visual result.
+- [ ] On load, `setContent(doc.content)` loads the merged document; the layout engine computes fresh splits when needed.
+- [ ] Verify the round-trip: save a document with split paragraphs → load → paragraphs are merged in the stored JSON → layout engine re-splits them correctly → identical visual result.
 
 ### 10e: Edge Cases (0.5h)
 
@@ -240,7 +237,7 @@ Phase 0 (scaffold)
         │                 └── Phase 5 (overlays)
         │                       └── Phase 8 (polish)
         └── Phase 6 (backend)
-              └── Phase 7 (serialisation + UI)
+              └── Phase 7 (Save/Load UI)
                     └── Phase 8 (polish)
                           └── Phase 9 (docs)
                                 └── ✓ V1 CHECKPOINT

@@ -6,7 +6,7 @@ alwaysApply: true
 
 ## TypeScript
 - Strict mode is on. Never use `any` — use `unknown` and narrow, or define a proper type.
-- All shared types live in `src/shared/types.ts`. Don't redeclare `EditorDocument`, `Paragraph`, `Run`, or `LayoutResult` locally.
+- All shared types live in `src/shared/types.ts`. Don't redeclare `EditorDocument` or `LayoutResult` locally.
 - The document model type is `EditorDocument`, not `Document`, to avoid collision with the global DOM `Document` interface. Use this name consistently everywhere.
 - All layout constants live in `src/shared/constants.ts`. Never hardcode page dimensions or margins.
 - Prefer `interface` for object shapes, `type` for unions and computed types.
@@ -17,11 +17,11 @@ alwaysApply: true
 - Colocate component logic — keep hooks, handlers, and JSX in the same file until complexity warrants extraction.
 - Avoid `useEffect` for derived state. Compute during render where possible.
 - Props should be typed with an explicit interface, not inline.
-- Never store TipTap editor state in React state — use `editor.getJSON()` for serialisation and `editor.commands.setContent()` for deserialisation. The editor instance is the source of truth during editing.
+- Never store TipTap editor state in React state — use `editor.getJSON()` for saving and `editor.commands.setContent()` for loading. The editor instance is the source of truth during editing.
 
 ## TipTap / ProseMirror
 - TipTap Decorations are visual-only. Never inject content into the document tree for layout purposes.
-- `getJSON()` is the serialisation boundary. Anything that shouldn't persist (page gaps, overlays) must not appear in the document model.
+- `getJSON()` is the persistence boundary. Anything that shouldn't persist (page gaps, overlays) must not appear in the document model.
 - Layout-triggered transactions (e.g. mid-paragraph splits in Phase 10) must use `addToHistory: false` to keep undo/redo clean.
 - Access ProseMirror APIs through `@tiptap/pm` — don't install `prosemirror-*` packages directly.
 
@@ -45,8 +45,10 @@ alwaysApply: true
 - Save and load UI must surface errors to the user (e.g. toast, inline message). No silent failures, no unhandled promise rejections.
 - Handle at minimum: network failure, 404 on load, and server validation errors.
 
-## Serialisation
-- Any change to serialisation or deserialisation must be verified with a manual round-trip test: save → hard refresh → load by ID → visually compare content structure and pagination.
+## Save/Load (Persistence)
+
+- Save sends `editor.getJSON()` as `content`; load uses `editor.commands.setContent(doc.content)`. No custom serialisation format.
+- Any change to save/load must be verified with a manual round-trip test: save → hard refresh → load by ID → visually compare content structure and pagination.
 - The persisted document model must never contain layout artifacts (decorations, page breaks, split markers). These are recomputed on load.
 
 ## DOM Measurement
