@@ -6,10 +6,18 @@ import type { LayoutResult } from "../../shared/types";
 import { MARGIN_BOTTOM, MARGIN_TOP, PAGE_GAP } from "../../shared/constants";
 
 /**
+ * Plugin state: layout result (for consumers) and decoration set (mapped across doc changes when layout is stale).
+ */
+export interface LayoutPluginState {
+  layoutResult: LayoutResult | null;
+  decorations: DecorationSet;
+}
+
+/**
  * Meta key for dispatching the current layout result into the plugin.
  * New LayoutResult values are dispatched via tr.setMeta('layoutResult', newLayoutResult).
  */
-export const layoutPluginKey = new PluginKey<LayoutResult | null>("layout");
+export const layoutPluginKey = new PluginKey<LayoutPluginState>("layout");
 
 function buildDecorations(layout: LayoutResult, doc: ProseMirrorNode): DecorationSet {
   const decorations: Decoration[] = [];
@@ -37,20 +45,33 @@ export const LayoutPlugin = Extension.create({
       new Plugin({
         key: layoutPluginKey,
         state: {
-          init(): LayoutResult | null {
-            return null;
+          init(_config, state): LayoutPluginState {
+            return {
+              layoutResult: null,
+              decorations: DecorationSet.empty,
+            };
           },
-          apply(tr, value): LayoutResult | null {
+          apply(tr, value, _oldState, newState): LayoutPluginState {
             const meta = tr.getMeta("layoutResult");
-            if (meta !== undefined) return meta as LayoutResult;
+            if (meta !== undefined) {
+              const layoutResult = meta as LayoutResult;
+              const decorations = buildDecorations(layoutResult, newState.doc);
+              return { layoutResult, decorations };
+            }
+            if (tr.docChanged && value.decorations !== DecorationSet.empty) {
+              return {
+                layoutResult: value.layoutResult,
+                decorations: value.decorations.map(tr.mapping, newState.doc),
+              };
+            }
             return value;
           },
         },
         props: {
           decorations(state) {
-            const layout = layoutPluginKey.getState(state);
-            if (!layout) return null;
-            return buildDecorations(layout, state.doc);
+            const pluginState = layoutPluginKey.getState(state);
+            if (!pluginState || pluginState.decorations === DecorationSet.empty) return null;
+            return pluginState.decorations;
           },
         },
       }),
