@@ -1,0 +1,69 @@
+---
+description: Core project spec and architecture for the Materi Document Editor — a live pagination prototype using React + TipTap + Express
+alwaysApply: true
+---
+
+# Materi Document Editor — Project Context
+
+The full PRD lives at `docs/PRD.md`. Read it before making architectural decisions.
+
+## Quick Reference
+
+**What we're building:** A browser-based document editor with live A4 pagination, backed by an Express API with in-memory JSON persistence.
+
+**Stack:** React + TipTap (frontend), Express (backend), TypeScript throughout.
+
+**Core architecture (decoration approach):**
+- Single TipTap editor instance — all native editing behaviour preserved.
+- Layout engine is a **pure function**: reads DOM measurements, outputs `LayoutResult` (page breaks, text start positions, page count).
+- Two-pass measurement: Pass 1 reads paragraph heights (batch `getBoundingClientRect`), Pass 2 reads line rects on boundary paragraphs only (`getClientRects`).
+- Visual page breaks via TipTap Decoration API (`margin-top` on first paragraph of each new page) — decorations never enter the document model.
+- Page frames and numbers rendered as absolutely positioned overlays outside TipTap's content flow.
+
+**Layout constants** (centralised in a single file):
+
+| Constant | Value |
+|----------|-------|
+| PAGE_WIDTH | 794px |
+| PAGE_HEIGHT | 1123px |
+| MARGIN_TOP | 96px |
+| MARGIN_BOTTOM | 96px |
+| MARGIN_LEFT | 96px |
+| MARGIN_RIGHT | 96px |
+| CONTENT_HEIGHT | 931px |
+
+## Key Constraints
+
+- **Determinism over features.** Prioritise correctness and testability.
+- **Document model is source of truth.** Decorations/overlays are visual-only. `getJSON()` round-trips cleanly.
+- **Bounded reflow.** Remeasure from the dirty paragraph onwards, not the full document.
+- **Gate on `document.fonts.ready`** before the first layout pass.
+- **No secrets.** Zero paid API keys required to run.
+- **Single-command startup.** `npm install && npm run dev` must work on a clean machine.
+
+## V1 Page Break Behaviour
+
+Paragraph-level pushing only — if a paragraph doesn't fit, the entire paragraph moves to the next page. No mid-paragraph splits in V1.
+
+## Edit Cycle
+
+```
+User types → TipTap updates DOM → debounce 100–150ms → Pass 1 (paragraph heights) → Pass 2 (line rects on boundary paragraphs) → LayoutResult → decorations + overlays update
+```
+
+## API
+
+- `POST /documents` — save document, returns `{ id }`. Server sets timestamps.
+- `GET /documents/:id` — returns `{ id, title, content, created_at, updated_at }`.
+- In-memory storage; does not survive server restart.
+
+## Acceptance Criteria
+
+1. Type text, see page boundaries and numbers.
+2. Create 3+ pages with reflow.
+3. Save → refresh → Load by ID → identical content structure and pagination.
+4. No runtime console errors during typical usage.
+
+## Out of Scope (V1)
+
+Mid-paragraph splitting, rich text formatting, images/tables, collaboration, auth, print/export, mobile.
