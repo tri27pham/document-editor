@@ -1,5 +1,5 @@
 import type { Editor } from "@tiptap/core";
-import type { LayoutResult } from "../../shared/types";
+import type { LayoutResult, PageStartPosition } from "../../shared/types";
 
 export interface ParagraphMeasurement {
   height: number;
@@ -32,14 +32,39 @@ export function measureParagraphs(editor: Editor): ParagraphMeasurement[] {
 
 /**
  * Pure layout function: reads paragraph measurements, returns page break positions.
- *
- * Pass 1: batch-read paragraph heights from dirty point onwards.
- * Pass 2: line-level measurement on boundary paragraphs only.
+ * Whole-paragraph pushing (V1): when a paragraph doesn't fit on the current page,
+ * the entire paragraph moves to the next page. Straddling paragraphs are logged
+ * as candidates for future mid-paragraph splitting.
  */
 export function computeLayout(
-  _paragraphHeights: number[],
-  _contentHeight: number
+  measurements: ParagraphMeasurement[],
+  contentHeight: number
 ): LayoutResult {
-  // TODO: implement pagination algorithm (Phase 3)
-  return { pageCount: 1, pageStartPositions: [] };
+  let pageCount = 1;
+  let accumulatedHeightOnCurrentPage = 0;
+  const pageStartPositions: PageStartPosition[] = [];
+
+  for (const p of measurements) {
+    const remainingOnPage = contentHeight - accumulatedHeightOnCurrentPage;
+
+    if (p.height > remainingOnPage) {
+      // Whole paragraph doesn't fit; move to next page
+      console.log("[layout] Straddling paragraph (candidate for mid-paragraph split):", {
+        pmPos: p.pmPos,
+        height: p.height,
+        remainingOnPage,
+      });
+      pageStartPositions.push({
+        proseMirrorPos: p.pmPos,
+        pageNumber: pageCount + 1,
+        remainingSpace: remainingOnPage,
+      });
+      pageCount += 1;
+      accumulatedHeightOnCurrentPage = p.height;
+    } else {
+      accumulatedHeightOnCurrentPage += p.height;
+    }
+  }
+
+  return { pageCount, pageStartPositions };
 }
