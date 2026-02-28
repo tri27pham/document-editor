@@ -5,7 +5,7 @@ alwaysApply: true
 
 # Materi Document Editor — Project Context
 
-The full PRD lives at `docs/PRD.md`. The phased implementation plan lives at `docs/IMPLEMENTATION_PLAN.md`. Read both before making architectural decisions or starting new work.
+The full PRD lives at `docs/PRD.md`. The phased implementation plan lives at `docs/IMPLEMENTATION_PLAN.md`. The line-by-line (mid-paragraph) pagination plan lives at `docs/LINE_BY_LINE_PAGINATION.md`. Read the PRD and implementation plan before architectural decisions or new work; read the line-by-line plan when implementing Phase 10.
 
 ## Quick Reference
 
@@ -74,7 +74,7 @@ Follow `docs/IMPLEMENTATION_PLAN.md` for the build order. Key sequencing:
 - **Phase 8:** Polish and edge cases
 - **Phase 9:** Documentation (README, ARCHITECTURE.md, AI_USAGE.md)
 - **V1 checkpoint:** All 4 acceptance criteria must pass before proceeding
-- **Phase 10:** Mid-paragraph splitting (post-V1 extension)
+- **Phase 10:** Line-by-line pagination (mid-paragraph splitting) — follow `docs/LINE_BY_LINE_PAGINATION.md` for the full plan (splitId, merge pass, split transaction, merge on reflow, merge on save).
 
 Phases 6 and 2–5 can run in parallel. Do not skip the V1 checkpoint.
 

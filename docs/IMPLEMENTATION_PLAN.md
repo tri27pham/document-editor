@@ -185,44 +185,20 @@ At this point all four acceptance criteria should pass. **Do not proceed to para
 
 ---
 
-## Phase 10: Mid-Paragraph Splitting (4–6h)
+## Phase 10: Line-by-Line Pagination (Mid-Paragraph Splitting)
 
 **Prerequisite:** V1 is stable and all acceptance criteria pass.
 
-### 10a: Line-to-Offset Mapping (1–1.5h)
+The detailed implementation plan for splitting paragraphs at the exact line where they overflow a page boundary (and merging on reflow) lives in **`docs/LINE_BY_LINE_PAGINATION.md`**. It covers:
 
-- [ ] For straddling paragraphs identified during the layout pass (those that don't fit on the current page but are too large to simply push), map the break line's y-coordinate to a text offset within the paragraph.
-- [ ] Use `getClientRects()` on the paragraph's text node to identify individual line y-coordinates, find the line at the page boundary.
-- [ ] Then use `document.caretPositionFromPoint()` (or `caretRangeFromPoint` for WebKit) at the break y-coordinate to get a DOM position, then map to a ProseMirror offset using `editor.view.posAtCoords()`.
-- [ ] Verify: log the offset for a known paragraph and confirm it corresponds to the correct character position.
+- **10a:** Paragraph node spec extension (`splitId` attribute)
+- **10b:** Line-level split point detection (`Range.getClientRects()`, `caretPositionFromPoint`, `view.posAtDOM`)
+- **10c:** Split transaction (UUID, `tr.split`, `addToHistory: false`, cascading splits)
+- **10d:** Merge on reflow (adjacent `splitId` pairs, merge backward, then re-measure)
+- **10e:** Edge cases (3+ page spans, cursor at split, empty second half, mixed formatting)
+- **Merge on save:** Merge `splitId` pairs before sending content to the API so the persisted document has no artificial splits.
 
-### 10b: Split Transaction (1–1.5h)
-
-- [ ] Execute a TipTap/ProseMirror transaction that splits the boundary paragraph at the computed offset.
-- [ ] Use `addToHistory: false` on the transaction to keep undo history clean — users should not undo layout-triggered splits.
-- [ ] Add a custom attribute `continuedFrom: paragraphId` to the second half of the split paragraph to track the relationship.
-- [ ] The second half receives the `margin-top` decoration — same mechanism as V1's whole-paragraph pushing.
-- [ ] Verify: type a long paragraph that crosses a page boundary. It splits visually at the correct line. Cursor behaviour is correct on both halves.
-
-### 10c: Merge on Reflow (1–1.5h)
-
-- [ ] At the start of each layout pass (before measurement), scan for `continuedFrom` paragraph pairs where the split is no longer needed (both halves now fit on the same page).
-- [ ] Merge them back into a single paragraph via a TipTap transaction (`addToHistory: false`).
-- [ ] Handle cascading splits: a paragraph spanning 3+ pages produces multiple splits. The layout pass runs iteratively until no paragraph overflows. This converges because splits only make paragraphs shorter.
-- [ ] Verify: type a long paragraph across a page boundary (splits). Delete content above it so it fits on one page (merges back). Undo/redo still works correctly from the user's perspective.
-
-### 10d: Merge on Save (0.5–1h)
-
-- [ ] On save, walk the document tree and detect `continuedFrom` pairs. Merge them back into single paragraphs before sending to the API.
-- [ ] The persisted document never contains artificial splits.
-- [ ] On load, `setContent(doc.content)` loads the merged document; the layout engine computes fresh splits when needed.
-- [ ] Verify the round-trip: save a document with split paragraphs → load → paragraphs are merged in the stored JSON → layout engine re-splits them correctly → identical visual result.
-
-### 10e: Edge Cases (0.5h)
-
-- [ ] Paragraph that spans 3 pages (two splits of the same original).
-- [ ] Split paragraph where the user then edits text in the first half, causing the split point to shift.
-- [ ] Cursor positioned at the split point during a reflow — confirm it doesn't jump unexpectedly.
+Estimated time: 4–6h. Follow the phased checklist in that document; keep changes to existing V1 code minimal (see “Changes to Existing V1 Code” table there).
 
 ---
 

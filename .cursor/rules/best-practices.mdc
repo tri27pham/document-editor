@@ -22,7 +22,7 @@ alwaysApply: true
 ## TipTap / ProseMirror
 - TipTap Decorations are visual-only. Never inject content into the document tree for layout purposes.
 - `getJSON()` is the persistence boundary. Anything that shouldn't persist (page gaps, overlays) must not appear in the document model.
-- Layout-triggered transactions (e.g. mid-paragraph splits in Phase 10) must use `addToHistory: false` to keep undo/redo clean.
+- Layout-triggered transactions (e.g. mid-paragraph splits in Phase 10) must use `addToHistory: false` to keep undo/redo clean. See `docs/LINE_BY_LINE_PAGINATION.md` for the full plan.
 - Access ProseMirror APIs through `@tiptap/pm` — don't install `prosemirror-*` packages directly.
 
 ## Layout Engine
