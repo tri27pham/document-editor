@@ -7,8 +7,11 @@ import { LayoutPlugin } from "../extensions/layoutPlugin";
 import { PageOverlay } from "./PageOverlay";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 
-const LAYOUT_DEBOUNCE_MS = 120;
-
+/**
+ * Layout is scheduled with requestAnimationFrame so it runs on the next frame
+ * (~16ms) after the last edit, reducing visible delay before page-break margins appear.
+ * Rapid edits still batch into a single layout per frame.
+ */
 export function Editor() {
   const [pageCount, setPageCount] = useState(1);
 
@@ -17,7 +20,7 @@ export function Editor() {
     content: "<p>Start typing…</p>",
   });
 
-  const layoutTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const layoutRafRef = useRef<number | null>(null);
   const firstLayoutDoneRef = useRef(false);
   const lastLayoutDocRef = useRef<ProseMirrorNode | null>(null);
 
@@ -36,26 +39,27 @@ export function Editor() {
 
     const scheduleLayout = (): void => {
       if (editor.state.doc === lastLayoutDocRef.current) return;
-      if (layoutTimeoutRef.current !== null) {
-        clearTimeout(layoutTimeoutRef.current);
-      }
-      layoutTimeoutRef.current = setTimeout(async () => {
-        layoutTimeoutRef.current = null;
+      if (layoutRafRef.current !== null) cancelAnimationFrame(layoutRafRef.current);
+      layoutRafRef.current = requestAnimationFrame(() => {
+        layoutRafRef.current = null;
         if (!firstLayoutDoneRef.current) {
-          await document.fonts.ready;
-          firstLayoutDoneRef.current = true;
+          document.fonts.ready.then(() => {
+            firstLayoutDoneRef.current = true;
+            runLayout();
+          });
+        } else {
+          runLayout();
         }
-        runLayout();
-      }, LAYOUT_DEBOUNCE_MS);
+      });
     };
 
     editor.on("update", scheduleLayout);
 
     return () => {
       editor.off("update", scheduleLayout);
-      if (layoutTimeoutRef.current !== null) {
-        clearTimeout(layoutTimeoutRef.current);
-        layoutTimeoutRef.current = null;
+      if (layoutRafRef.current !== null) {
+        cancelAnimationFrame(layoutRafRef.current);
+        layoutRafRef.current = null;
       }
     };
   }, [editor]);
