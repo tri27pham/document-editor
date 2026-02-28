@@ -1,4 +1,34 @@
+import type { Editor } from "@tiptap/core";
 import type { LayoutResult } from "../../shared/types";
+
+export interface ParagraphMeasurement {
+  height: number;
+  pmPos: number;
+}
+
+/**
+ * Walk editor.state.doc in lockstep with the live DOM to collect
+ * getBoundingClientRect().height and the ProseMirror offset for each
+ * top-level node. The offset from doc.forEach is the position needed
+ * later for Decoration.node(from, to, …).
+ */
+export function measureParagraphs(editor: Editor): ParagraphMeasurement[] {
+  const { doc } = editor.state;
+  const { view } = editor;
+  const measurements: ParagraphMeasurement[] = [];
+
+  doc.forEach((node, offset) => {
+    const dom = view.nodeDOM(offset);
+    if (dom instanceof HTMLElement) {
+      measurements.push({
+        height: dom.getBoundingClientRect().height,
+        pmPos: offset,
+      });
+    }
+  });
+
+  return measurements;
+}
 
 /**
  * Pure layout function: reads paragraph measurements, returns page break positions.
@@ -10,6 +40,6 @@ export function computeLayout(
   _paragraphHeights: number[],
   _contentHeight: number
 ): LayoutResult {
-  // TODO: implement pagination algorithm
-  return { pageBreaks: [], textStartY: [0], pageCount: 1 };
+  // TODO: implement pagination algorithm (Phase 3)
+  return { pageCount: 1, pageStartPositions: [] };
 }
