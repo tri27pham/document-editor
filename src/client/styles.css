@@ -1,3 +1,14 @@
+/* --- Layout Variables (set from shared/constants.ts at runtime) --- */
+
+:root {
+  --page-width: 794px;
+  --page-height: 1123px;
+  --margin-top: 96px;
+  --margin-bottom: 96px;
+  --margin-left: 96px;
+  --margin-right: 96px;
+}
+
 /* --- Reset & Base --- */
 
 *,
@@ -84,8 +95,8 @@ body {
 
 .editor-container {
   position: relative;
-  width: 794px;
-  min-height: 1123px;
+  width: var(--page-width);
+  min-height: var(--page-height);
   margin: 40px auto;
   background: #fff;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
@@ -120,8 +131,8 @@ body {
 /* --- ProseMirror (TipTap editable area) --- */
 
 .ProseMirror {
-  padding: 96px;
-  min-height: 1123px;
+  padding: var(--margin-top) var(--margin-right) var(--margin-bottom) var(--margin-left);
+  min-height: var(--page-height);
   outline: none;
   word-wrap: break-word;
   white-space: pre-wrap;
