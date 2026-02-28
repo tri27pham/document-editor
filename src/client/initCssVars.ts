@@ -5,6 +5,7 @@ import {
   MARGIN_BOTTOM,
   MARGIN_LEFT,
   MARGIN_RIGHT,
+  PAGE_GAP,
 } from "../shared/constants";
 
 export function initCssVars(): void {
@@ -15,4 +16,5 @@ export function initCssVars(): void {
   root.setProperty("--margin-bottom", `${MARGIN_BOTTOM}px`);
   root.setProperty("--margin-left", `${MARGIN_LEFT}px`);
   root.setProperty("--margin-right", `${MARGIN_RIGHT}px`);
+  root.setProperty("--page-gap", `${PAGE_GAP}px`);
 }

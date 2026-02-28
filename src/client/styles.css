@@ -7,6 +7,7 @@
   --margin-bottom: 96px;
   --margin-left: 96px;
   --margin-right: 96px;
+  --page-gap: 40px;
 }
 
 /* --- Reset & Base --- */
@@ -98,8 +99,6 @@ body {
   width: var(--page-width);
   min-height: var(--page-height);
   margin: 40px auto;
-  background: #fff;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
 
 /* --- Page Overlay (frames + numbers) --- */
@@ -110,12 +109,18 @@ body {
   left: 0;
   width: 100%;
   pointer-events: none;
-  z-index: 10;
+  z-index: 0;
 }
 
 .page-frame {
   position: relative;
   border: 1px solid #c0c0c0;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.page-frame + .page-frame {
+  margin-top: var(--page-gap);
 }
 
 .page-number {
@@ -131,6 +136,8 @@ body {
 /* --- ProseMirror (TipTap editable area) --- */
 
 .ProseMirror {
+  position: relative;
+  z-index: 1;
   padding: var(--margin-top) var(--margin-right) var(--margin-bottom) var(--margin-left);
   min-height: var(--page-height);
   outline: none;

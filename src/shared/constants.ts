@@ -5,3 +5,4 @@ export const MARGIN_BOTTOM = 96;
 export const MARGIN_LEFT = 96;
 export const MARGIN_RIGHT = 96;
 export const CONTENT_HEIGHT = PAGE_HEIGHT - MARGIN_TOP - MARGIN_BOTTOM; // 931
+export const PAGE_GAP = 40;
