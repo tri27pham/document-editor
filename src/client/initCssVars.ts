@@ -6,6 +6,7 @@ import {
   MARGIN_LEFT,
   MARGIN_RIGHT,
   PAGE_GAP,
+  PARAGRAPH_SPACING,
 } from "../shared/constants";
 
 export function initCssVars(): void {
@@ -17,4 +18,5 @@ export function initCssVars(): void {
   root.setProperty("--margin-left", `${MARGIN_LEFT}px`);
   root.setProperty("--margin-right", `${MARGIN_RIGHT}px`);
   root.setProperty("--page-gap", `${PAGE_GAP}px`);
+  root.setProperty("--paragraph-spacing", `${PARAGRAPH_SPACING}px`);
 }

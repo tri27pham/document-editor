@@ -39,7 +39,7 @@ Remaining buffer for debugging, polish, and documentation: 2–6 hours of the 24
 
 **Goal:** The shared types and constants that everything else references.
 
-- [ ] `shared/constants.ts` — all layout constants from the PRD (PAGE_WIDTH, PAGE_HEIGHT, margins, CONTENT_HEIGHT, PAGE_GAP).
+- [ ] `shared/constants.ts` — all layout constants from the PRD (PAGE_WIDTH, PAGE_HEIGHT, margins, CONTENT_HEIGHT, PAGE_GAP, PARAGRAPH_SPACING).
 - [ ] `shared/types.ts`:
   - `EditorDocument`, `Paragraph`, `Run` — document model types. Named `EditorDocument` to avoid shadowing the global DOM `Document` interface.
   - `LayoutResult` interface:
@@ -75,8 +75,8 @@ Remaining buffer for debugging, polish, and documentation: 2–6 hours of the 24
 
 **Goal:** Measure paragraph heights from the TipTap DOM and determine which paragraphs land on which pages. Produce a `LayoutResult`.
 
-- [ ] Write a measurement function that walks `editor.state.doc.forEach((node, offset) => ...)` in lockstep with the corresponding DOM elements, collecting both `getBoundingClientRect().height` and the ProseMirror `offset` position for each paragraph. The `offset` value from `doc.forEach` is the ProseMirror position needed later for `Decoration.node()`.
-- [ ] Write the pagination algorithm: walk paragraphs, accumulate heights against CONTENT_HEIGHT, determine page assignments. When a paragraph doesn't fit on the current page, the entire paragraph moves to the next page (whole-paragraph pushing in V1). Log straddling paragraphs (those exceeding remaining page space) to console as candidates for future mid-paragraph splitting.
+- [ ] Write a measurement function that walks `editor.state.doc.forEach((node, offset) => ...)` in lockstep with the corresponding DOM elements, collecting `getBoundingClientRect().height` and the ProseMirror `offset` for each paragraph (the offset is the position needed later for `Decoration.node()`). Paragraph spacing is not measured; the layout engine adds **PARAGRAPH_SPACING** from shared constants when accumulating height per paragraph.
+- [ ] Write the pagination algorithm: walk paragraphs, accumulate **height + PARAGRAPH_SPACING** (from shared constants) against CONTENT_HEIGHT, determine page assignments. When a paragraph (or paragraph + gap) doesn't fit on the current page, the entire paragraph moves to the next page (whole-paragraph pushing in V1). Log straddling paragraphs (paragraph alone exceeds remaining page space) to console as candidates for future mid-paragraph splitting.
 - [ ] Produce a `LayoutResult`:
   - `pageCount`: total number of pages.
   - `pageStartPositions`: array of `{ proseMirrorPos, pageNumber, remainingSpace }` for each page after the first — these are the paragraphs that start a new page and will receive decorations. `remainingSpace` is `CONTENT_HEIGHT - accumulatedHeightOnCurrentPage` at the point the page break is triggered, captured naturally during the pagination walk.
@@ -85,7 +85,7 @@ Remaining buffer for debugging, polish, and documentation: 2–6 hours of the 24
 
 **Why now:** This is the core algorithm. Get it right in isolation before adding any visual output.
 
-**Note on measurement stability:** `getBoundingClientRect().height` does **not** include margin, so decoration margins from Phase 4 will not affect paragraph height measurements. There is no need to clear decorations before measuring. The layout cycle is stable:
+**Note on measurement stability:** `getBoundingClientRect().height` does **not** include margin, so decoration margins from Phase 4 will not affect paragraph height measurements. Paragraph spacing is taken from the shared **PARAGRAPH_SPACING** constant and added when accumulating height in the layout algorithm, so page breaks align with the visual gap between paragraphs (the same constant drives the CSS variable for `.ProseMirror p { margin-bottom }`). There is no need to clear decorations before measuring. The layout cycle is stable:
 1. TipTap updates from the edit
 2. Measure all paragraph heights (decorations don't affect measurements)
 3. Run pagination algorithm → new `LayoutResult`
