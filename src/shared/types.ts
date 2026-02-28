@@ -7,7 +7,7 @@ export interface Paragraph {
   runs: Run[];
 }
 
-export interface Document {
+export interface EditorDocument {
   id?: string;
   title: string;
   content: Paragraph[];

@@ -7,7 +7,7 @@ import {
   MARGIN_RIGHT,
 } from "../shared/constants";
 
-export function initCssVars() {
+export function initCssVars(): void {
   const root = document.documentElement.style;
   root.setProperty("--page-width", `${PAGE_WIDTH}px`);
   root.setProperty("--page-height", `${PAGE_HEIGHT}px`);
