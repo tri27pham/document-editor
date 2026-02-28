@@ -20,7 +20,7 @@ Remaining buffer for debugging, polish, and documentation: 2–6 hours of the 24
     server/
       index.ts       # Express entry
     shared/
-      types.ts       # Document model types, LayoutResult
+      types.ts       # EditorDocument model types, LayoutResult
       constants.ts   # Layout constants (single source of truth)
   docs/
     PRD.md
@@ -39,8 +39,20 @@ Remaining buffer for debugging, polish, and documentation: 2–6 hours of the 24
 
 **Goal:** The shared types and constants that everything else references.
 
-- [ ] `shared/constants.ts` — all layout constants from the PRD (PAGE_WIDTH, PAGE_HEIGHT, margins, CONTENT_HEIGHT).
-- [ ] `shared/types.ts` — `Document`, `Paragraph`, `Run`, `LayoutResult` types. Keep these minimal.
+- [ ] `shared/constants.ts` — all layout constants from the PRD (PAGE_WIDTH, PAGE_HEIGHT, margins, CONTENT_HEIGHT, PAGE_GAP).
+- [ ] `shared/types.ts`:
+  - `EditorDocument`, `Paragraph`, `Run` — document model types. Named `EditorDocument` to avoid shadowing the global DOM `Document` interface.
+  - `LayoutResult` interface:
+    ```typescript
+    interface LayoutResult {
+      pageCount: number
+      pageStartPositions: {
+        proseMirrorPos: number  // where to apply the decoration
+        pageNumber: number      // which page this starts (2, 3, 4...)
+        remainingSpace: number  // gap from last paragraph bottom to previous page's content boundary
+      }[]
+    }
+    ```
 
 **Why now:** These are dependencies for both the editor and the layout engine. Define them once before any implementation code.
 
@@ -59,19 +71,25 @@ Remaining buffer for debugging, polish, and documentation: 2–6 hours of the 24
 
 ---
 
-## Phase 3: Layout Engine — Pass 1 (2–2.5h)
+## Phase 3: Layout Engine (2–2.5h)
 
-**Goal:** Measure paragraph heights from the TipTap DOM and determine which paragraphs land on which pages.
+**Goal:** Measure paragraph heights from the TipTap DOM and determine which paragraphs land on which pages. Produce a `LayoutResult`.
 
-- [ ] Write a function that takes a reference to the TipTap editor DOM and returns an array of paragraph heights using `getBoundingClientRect()`.
-- [ ] Write the pagination algorithm: walk paragraphs, accumulate heights against CONTENT_HEIGHT, determine page assignments. Output which paragraph is the first on each new page.
-- [ ] Produce a `LayoutResult` with `pageBreaks` (y-offsets), `pageCount`, and `textStartY` per page.
-- [ ] Wire it into the editor: trigger on editor `update` event with a debounce (100–150ms).
+- [ ] Write a measurement function that walks `editor.state.doc.forEach((node, offset) => ...)` in lockstep with the corresponding DOM elements, collecting both `getBoundingClientRect().height` and the ProseMirror `offset` position for each paragraph. The `offset` value from `doc.forEach` is the ProseMirror position needed later for `Decoration.node()`.
+- [ ] Write the pagination algorithm: walk paragraphs, accumulate heights against CONTENT_HEIGHT, determine page assignments. When a paragraph doesn't fit on the current page, the entire paragraph moves to the next page (whole-paragraph pushing in V1). Log straddling paragraphs (those exceeding remaining page space) to console as candidates for future mid-paragraph splitting.
+- [ ] Produce a `LayoutResult`:
+  - `pageCount`: total number of pages.
+  - `pageStartPositions`: array of `{ proseMirrorPos, pageNumber, remainingSpace }` for each page after the first — these are the paragraphs that start a new page and will receive decorations. `remainingSpace` is `CONTENT_HEIGHT - accumulatedHeightOnCurrentPage` at the point the page break is triggered, captured naturally during the pagination walk.
+- [ ] Wire it into the editor: trigger on editor `update` event with a 100–150ms debounce. The debounce exists for batching rapid edits, not for performance — a full layout pass on 50 paragraphs is 2–5ms total JS time.
 - [ ] Console.log the `LayoutResult` to verify correctness — type enough text to overflow one page and confirm the break point is correct.
 
 **Why now:** This is the core algorithm. Get it right in isolation before adding any visual output.
 
-**Key decision:** V1 pushes whole paragraphs. If a paragraph doesn't fit on the current page, its entire height goes to the next page. The algorithm is a simple accumulator with a reset on overflow.
+**Note on measurement stability:** `getBoundingClientRect().height` does **not** include margin, so decoration margins from Phase 4 will not affect paragraph height measurements. There is no need to clear decorations before measuring. The layout cycle is stable:
+1. TipTap updates from the edit
+2. Measure all paragraph heights (decorations don't affect measurements)
+3. Run pagination algorithm → new `LayoutResult`
+4. Apply new decorations
 
 ---
 
@@ -79,11 +97,12 @@ Remaining buffer for debugging, polish, and documentation: 2–6 hours of the 24
 
 **Goal:** The first paragraph on each new page gets a `margin-top` decoration that creates the visual gap between pages.
 
-- [ ] Implement a TipTap plugin that reads from `LayoutResult` and applies `Decoration.node()` with a `style` attribute setting `margin-top` on the target paragraph nodes.
-- [ ] The margin value = `MARGIN_BOTTOM + page_gap_visual + MARGIN_TOP`. Define `page_gap_visual` (the visible space between page bottoms and tops, e.g. 20–40px) in constants.
+- [ ] Implement a TipTap plugin that holds the current `LayoutResult` in its plugin state.
+- [ ] New `LayoutResult` values are dispatched into the plugin via `tr.setMeta('layoutResult', newLayoutResult)`.
+- [ ] The plugin's `decorations` method reads its state and maps each entry in `pageStartPositions` to a `Decoration.node()` call targeting the paragraph at `proseMirrorPos`, applying a `style` attribute with the appropriate `margin-top` value.
+- [ ] The margin value = `entry.remainingSpace + MARGIN_BOTTOM + PAGE_GAP + MARGIN_TOP`, where `entry.remainingSpace` is read directly from the corresponding `pageStartPositions` entry. This accounts for: the leftover space at the bottom of the previous page, the bottom margin of the ending page, the visible gap between pages, and the top margin of the new page.
+- [ ] Decorations are visual-only — they never enter the document model, don't affect `getJSON()`, and don't interact with undo/redo.
 - [ ] Verify: type enough text to create 2+ pages. A visible gap appears between pages. Content below the gap is correctly positioned. Typing above the gap causes content to reflow smoothly.
-
-**Critical check:** After decorations are applied, do the measurements from Phase 3 still hold? The margin-top shifts content below it, but since you only apply margin to paragraphs *after* the break point, and you measure *before* applying decorations, this should be stable. Verify this explicitly.
 
 ---
 
@@ -92,10 +111,12 @@ Remaining buffer for debugging, polish, and documentation: 2–6 hours of the 24
 **Goal:** A4 page outlines and "Page X of N" labels visible in the editor.
 
 - [ ] Create an overlay container as a sibling div to the TipTap editor, same dimensions, absolutely positioned over it, `pointer-events: none`.
-- [ ] For each page in `LayoutResult`, render:
+- [ ] For each page, derive the frame position from accumulated paragraph heights and decoration gap margins — do not rely on `textStartY` (which is reserved for future per-page instance use).
+  - Page 1 frame starts at y=0.
+  - Subsequent page frames start at the cumulative content height plus all preceding gap margins.
+- [ ] For each page frame, render:
   - A4 frame outline (border or box-shadow) at the correct y-position.
-  - Page number label (e.g. bottom-centre of each page frame).
-- [ ] Page 1 frame starts at y=0. Subsequent frames start at the `textStartY` for that page minus `MARGIN_TOP`.
+  - Page number label (e.g. bottom-centre of each page frame), using `pageCount` from `LayoutResult`.
 - [ ] Verify: visual page frames align with content. Page numbers update live as content reflows. Frames don't interfere with clicking/selecting text.
 
 **Milestone check:** At this point, AC-1 and AC-2 should pass. Type text → see page boundaries and numbers → create 3+ pages.
@@ -106,7 +127,7 @@ Remaining buffer for debugging, polish, and documentation: 2–6 hours of the 24
 
 **Goal:** Express server with two endpoints and in-memory storage.
 
-- [ ] `POST /documents` — accepts `{ title, content }`, generates UUID, sets `created_at` and `updated_at`, stores in a `Map<string, Document>`, returns `{ id }`.
+- [ ] `POST /documents` — accepts `{ title, content }`, generates UUID, sets `created_at` and `updated_at`, stores in a `Map<string, EditorDocument>`, returns `{ id }`.
 - [ ] `GET /documents/:id` — returns full document JSON or 404.
 - [ ] CORS enabled for local dev.
 - [ ] Verify with curl or Postman: POST a document, GET it back, confirm round-trip.
@@ -119,8 +140,8 @@ Remaining buffer for debugging, polish, and documentation: 2–6 hours of the 24
 
 **Goal:** Save and load documents through the UI with clean round-trip fidelity.
 
-- [ ] **Serialiser:** Convert `editor.getJSON()` → your document model format. TipTap paragraph nodes → `Paragraph`, text nodes with marks → `Run`. Decorations are not in `getJSON()` so no stripping needed.
-- [ ] **Deserialiser:** Your document model → TipTap node format, passed to `editor.commands.setContent()`.
+- [ ] **Serialiser:** Convert `editor.getJSON()` → your `EditorDocument` model format. TipTap paragraph nodes → `Paragraph`, text nodes with marks → `Run`. Decorations are not in `getJSON()` so no stripping needed.
+- [ ] **Deserialiser:** Your `EditorDocument` model → TipTap node format, passed to `editor.commands.setContent()`.
 - [ ] **Save button:** Serialise current editor state, POST to backend, display returned ID to user.
 - [ ] **Load input:** Text field for document ID, fetches from backend, deserialises into editor, triggers layout recalculation.
 - [ ] Gate the post-load layout pass on `document.fonts.ready` to ensure deterministic pagination.
@@ -138,7 +159,7 @@ Remaining buffer for debugging, polish, and documentation: 2–6 hours of the 24
 - [ ] Check for console errors during typical usage (AC-4). Fix any warnings from React strict mode or TipTap.
 - [ ] Handle empty document state gracefully (no pages = still show one blank page frame).
 - [ ] Handle rapid typing near page boundaries — confirm debounce prevents visual flickering.
-- [ ] Test with long paragraphs approaching full page height. Confirm they push cleanly.
+- [ ] Test with long paragraphs approaching full page height. Confirm they push cleanly. Log straddling paragraphs to console as expected.
 - [ ] Basic UI polish: save confirmation feedback, load error handling, reasonable visual styling.
 
 ---
@@ -148,7 +169,7 @@ Remaining buffer for debugging, polish, and documentation: 2–6 hours of the 24
 **Goal:** All required deliverables.
 
 - [ ] **`README.md`**: Prereqs, setup, run commands, API endpoints with curl examples, data model description, pagination strategy summary.
-- [ ] **`ARCHITECTURE.md` (≤2 pages)**: Editor state model, pagination algorithm (two-pass measurement → LayoutResult → decorations), persistence flow. Keep it tight — one paragraph on approach rationale, focus on the edit cycle.
+- [ ] **`ARCHITECTURE.md` (≤2 pages)**: Editor state model, pagination algorithm (measurement + pagination → LayoutResult → decorations → overlays), persistence flow. Keep it tight — brief approach rationale, focus on the edit cycle and layout engine, minimal persistence section.
 - [ ] **`AI_USAGE.md`**: Tools used, tasks, prompts.
 - [ ] **Chat logs** exported to `.md`.
 
@@ -173,8 +194,9 @@ At this point all four acceptance criteria should pass. **Do not proceed to para
 
 ### 10a: Line-to-Offset Mapping (1–1.5h)
 
-- [ ] For boundary paragraphs identified in Pass 2, map the break line's y-coordinate to a text offset within the paragraph.
-- [ ] Approach: use `document.caretPositionFromPoint()` (or `caretRangeFromPoint` for WebKit) at the break y-coordinate to get a DOM position, then map to a ProseMirror offset using `editor.view.posAtCoords()`.
+- [ ] For straddling paragraphs identified during the layout pass (those that don't fit on the current page but are too large to simply push), map the break line's y-coordinate to a text offset within the paragraph.
+- [ ] Use `getClientRects()` on the paragraph's text node to identify individual line y-coordinates, find the line at the page boundary.
+- [ ] Then use `document.caretPositionFromPoint()` (or `caretRangeFromPoint` for WebKit) at the break y-coordinate to get a DOM position, then map to a ProseMirror offset using `editor.view.posAtCoords()`.
 - [ ] Verify: log the offset for a known paragraph and confirm it corresponds to the correct character position.
 
 ### 10b: Split Transaction (1–1.5h)
@@ -182,7 +204,7 @@ At this point all four acceptance criteria should pass. **Do not proceed to para
 - [ ] Execute a TipTap/ProseMirror transaction that splits the boundary paragraph at the computed offset.
 - [ ] Use `addToHistory: false` on the transaction to keep undo history clean — users should not undo layout-triggered splits.
 - [ ] Add a custom attribute `continuedFrom: paragraphId` to the second half of the split paragraph to track the relationship.
-- [ ] The second half receives the `margin-top` decoration — same mechanism as V1's paragraph pushing.
+- [ ] The second half receives the `margin-top` decoration — same mechanism as V1's whole-paragraph pushing.
 - [ ] Verify: type a long paragraph that crosses a page boundary. It splits visually at the correct line. Cursor behaviour is correct on both halves.
 
 ### 10c: Merge on Reflow (1–1.5h)
@@ -194,7 +216,7 @@ At this point all four acceptance criteria should pass. **Do not proceed to para
 
 ### 10d: Serialisation Merge (0.5–1h)
 
-- [ ] On save, walk the document tree and detect `continuedFrom` pairs. Merge them back into single paragraphs before serialising to the document model.
+- [ ] On save, walk the document tree and detect `continuedFrom` pairs. Merge them back into single paragraphs before serialising to the `EditorDocument` model.
 - [ ] The persisted document never contains artificial splits.
 - [ ] On load, the layout engine computes fresh splits from the flat document model.
 - [ ] Verify the round-trip: save a document with split paragraphs → load → paragraphs are merged in the persisted model → layout engine re-splits them correctly → identical visual result.
