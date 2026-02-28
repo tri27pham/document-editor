@@ -5,7 +5,7 @@ alwaysApply: true
 
 # Materi Document Editor — Project Context
 
-The full PRD lives at `docs/PRD.md`. Read it before making architectural decisions.
+The full PRD lives at `docs/PRD.md`. The phased implementation plan lives at `docs/IMPLEMENTATION_PLAN.md`. Read both before making architectural decisions or starting new work.
 
 ## Quick Reference
 
@@ -63,6 +63,20 @@ User types → TipTap updates DOM → debounce 100–150ms → Pass 1 (paragraph
 2. Create 3+ pages with reflow.
 3. Save → refresh → Load by ID → identical content structure and pagination.
 4. No runtime console errors during typical usage.
+
+## Implementation Phases
+
+Follow `docs/IMPLEMENTATION_PLAN.md` for the build order. Key sequencing:
+
+- **Phases 0–1:** Scaffold + shared types/constants (foundation)
+- **Phases 2–5:** Editor → layout engine → decorations → overlays (core pagination)
+- **Phases 6–7:** Backend API → serialisation + save/load UI (persistence)
+- **Phase 8:** Polish and edge cases
+- **Phase 9:** Documentation (README, ARCHITECTURE.md, AI_USAGE.md)
+- **V1 checkpoint:** All 4 acceptance criteria must pass before proceeding
+- **Phase 10:** Mid-paragraph splitting (post-V1 extension)
+
+Phases 6 and 2–5 can run in parallel. Do not skip the V1 checkpoint.
 
 ## Out of Scope (V1)
 
