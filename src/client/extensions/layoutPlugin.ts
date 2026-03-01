@@ -1,8 +1,8 @@
+import type { LayoutResult, PageStartPosition } from "../../shared/types";
 import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
-import type { LayoutResult, PageStartPosition } from "../../shared/types";
 
 function isPageStartPosition(v: unknown): v is PageStartPosition {
   return (

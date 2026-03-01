@@ -37,8 +37,7 @@ export function measureParagraphs(editor: Editor): ParagraphMeasurement[] {
 /**
  * Pure layout function: reads paragraph measurements, returns page break positions.
  * Whole-paragraph pushing (V1): when a paragraph doesn't fit on the current page,
- * the entire paragraph moves to the next page. Straddling paragraphs are logged
- * as candidates for future mid-paragraph splitting.
+ * the entire paragraph moves to the next page. 
  * Paragraph spacing (PARAGRAPH_SPACING constant) is included so each paragraph reserves height + gap.
  */
 export function computeLayout(
