@@ -1,5 +1,7 @@
 # Materi Document Editor
 
+### NOTE: Other deliverables in deliverables folder
+
 A browser-based document editor with live A4 pagination. Content flows across fixed-size pages as you type, with line-by-line (mid-paragraph) breaks when a paragraph spans a page boundary. Documents are saved and loaded via a simple JSON API.
 
 ## Prerequisites
