@@ -1,4 +1,4 @@
-# Materi Document Editor
+# Document Editor
 
 ### NOTE: Other deliverables in deliverables folder
 
