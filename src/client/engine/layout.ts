@@ -12,15 +12,18 @@ export interface ParagraphMeasurement {
  * getBoundingClientRect().height and the ProseMirror offset for each
  * top-level node. The offset from doc.forEach is the position needed
  * later for Decoration.node(from, to, …).
+ * Uses Element (not only HTMLElement) so SVG and other custom node views are measured.
+ * Nodes with no DOM or non-Element DOM (e.g. Text) are skipped; the caller must
+ * check that measurements.length === doc.childCount before using the result.
  */
 export function measureParagraphs(editor: Editor): ParagraphMeasurement[] {
   const { doc } = editor.state;
   const { view } = editor;
   const measurements: ParagraphMeasurement[] = [];
 
-  doc.forEach((node, offset) => {
+  doc.forEach((_node, offset) => {
     const dom = view.nodeDOM(offset);
-    if (dom instanceof HTMLElement) {
+    if (dom instanceof Element) {
       measurements.push({
         height: dom.getBoundingClientRect().height,
         pmPos: offset,
@@ -34,8 +37,7 @@ export function measureParagraphs(editor: Editor): ParagraphMeasurement[] {
 /**
  * Pure layout function: reads paragraph measurements, returns page break positions.
  * Whole-paragraph pushing (V1): when a paragraph doesn't fit on the current page,
- * the entire paragraph moves to the next page. Straddling paragraphs are logged
- * as candidates for future mid-paragraph splitting.
+ * the entire paragraph moves to the next page. 
  * Paragraph spacing (PARAGRAPH_SPACING constant) is included so each paragraph reserves height + gap.
  */
 export function computeLayout(
@@ -51,13 +53,6 @@ export function computeLayout(
     const spaceNeeded = p.height + PARAGRAPH_SPACING;
 
     if (spaceNeeded > remainingOnPage) {
-      if (p.height > remainingOnPage) {
-        console.log("[layout] Straddling paragraph (candidate for mid-paragraph split):", {
-          pmPos: p.pmPos,
-          height: p.height,
-          remainingOnPage,
-        });
-      }
       pageStartPositions.push({
         proseMirrorPos: p.pmPos,
         pageNumber: pageCount + 1,

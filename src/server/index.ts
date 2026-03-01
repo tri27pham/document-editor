@@ -21,6 +21,10 @@ app.post("/documents", (req, res) => {
     res.status(400).json({ error: "Missing or invalid title or content" });
     return;
   }
+  if (typeof content !== "object" || content === null || Array.isArray(content)) {
+    res.status(400).json({ error: "Invalid content: must be a document object" });
+    return;
+  }
   const now = new Date().toISOString();
 
   if (bodyId != null && typeof bodyId === "string" && documents.has(bodyId)) {

@@ -20,6 +20,10 @@ export function useLayoutEngine(editor: Editor | null): number {
 
     const runLayout = (): void => {
       const measurements = measureParagraphs(editor);
+      const { doc } = editor.state;
+      if (measurements.length !== doc.childCount) {
+        return;
+      }
       const result = computeLayout(measurements, CONTENT_HEIGHT);
       lastLayoutDocRef.current = editor.state.doc;
       setPageCount(result.pageCount);
