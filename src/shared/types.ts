@@ -30,7 +30,6 @@ export interface PageEntrySplit {
   sourceProseMirrorPos: number;
   /** ProseMirror doc position at start of first overflow line; set by resolveSplitPositions. */
   resolvedPos?: number;
-  /** Set in computePageEntries; one UUID per source paragraph so all segments share the same id. */
   splitId?: string;
 }
 

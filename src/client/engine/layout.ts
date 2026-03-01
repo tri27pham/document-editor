@@ -3,6 +3,7 @@ import type {
   LayoutResult,
   PageStartPosition,
   PageEntry,
+  PageEntrySplit,
 } from "../../shared/types";
 import {
   PARAGRAPH_SPACING,
@@ -16,6 +17,7 @@ import { canSplit } from "@tiptap/pm/transform";
  * Merge adjacent paragraphs that share the same splitId (halves of a previous split).
  * Must run before measurement so we measure the unsplit document and re-split at the correct line.
  * Merges from end of document backward to keep positions valid. Dispatches with addToHistory: false.
+ * NOTE : CURRENTLY NOT WORKING DUE TO SPLITID BEING NULL IN THE PARAGRAPH NODE
  */
 export function mergeSplitParagraphs(editor: Editor): boolean {
   const { state } = editor;
@@ -146,6 +148,7 @@ export function computePageEntries(
   for (const m of measurements) {
     const { proseMirrorPos, totalHeight, lineRects } = m;
 
+    // No split needed
     if (accumulatedHeight + totalHeight <= contentHeight) {
       entries.push({
         height: totalHeight,
@@ -157,8 +160,8 @@ export function computePageEntries(
       continue;
     }
 
+    // No lines to split; push whole paragraph to next page.
     if (lineRects.length === 0) {
-      // No lines to split; push whole paragraph to next page.
       entries.push({
         height: totalHeight,
         lineRects: [],
@@ -172,6 +175,7 @@ export function computePageEntries(
       continue;
     }
 
+    // Find the last line that fits on the current page
     let fittingHeight = 0;
     let splitAfterLine = -1;
     for (let i = 0; i < lineRects.length; i++) {
@@ -184,8 +188,8 @@ export function computePageEntries(
       }
     }
 
+    // First line doesn't fit, push whole paragraph to next page
     if (splitAfterLine === -1) {
-      // First line doesn't fit; push whole paragraph to next page.
       entries.push({
         height: totalHeight,
         lineRects: [...lineRects],
@@ -198,7 +202,7 @@ export function computePageEntries(
       continue;
     }
 
-
+    // Split the paragraph at the last line that fits
     const remainingSpace = contentHeight - accumulatedHeight - fittingHeight;
     const remainingRects = lineRects.slice(splitAfterLine + 1);
     const remainingHeight = sumLineHeights(
@@ -207,6 +211,7 @@ export function computePageEntries(
       lineRects.length
     );
 
+    // Add the first part of the paragraph to the current page with split ID
     const splitId = crypto.randomUUID();
     entries.push({
       height: fittingHeight,
@@ -221,6 +226,7 @@ export function computePageEntries(
     let overflowRects = remainingRects;
     let remainingSpaceForDecoration = remainingSpace;
 
+    // Handle case where multiple splits are needed
     while (overflowHeight > contentHeight && overflowRects.length > 0) {
       let overflowFittingHeight = 0;
       let overflowFittingLastIndex = -1;
@@ -264,6 +270,7 @@ export function computePageEntries(
       );
     }
 
+    // Add the last part of the paragraph to the next page with split ID
     entries.push({
       height: overflowHeight,
       lineRects: overflowRects,
@@ -379,7 +386,7 @@ export function applySplitsAndDispatchLayout(
   const { state, schema } = editor;
   const paragraphType = schema.nodes.paragraph;
   const splitEntries = pageEntries.filter(
-    (e): e is PageEntry & { split: NonNullable<PageEntry["split"]> & { resolvedPos: number; splitId: string } } =>
+    (e): e is PageEntry & { split: NonNullable<PageEntrySplit> & { resolvedPos: number; splitId: string } } =>
       e.split !== null &&
       e.split.resolvedPos !== undefined &&
       e.split.splitId != null
