@@ -24,10 +24,12 @@ export interface PageEntryDecoration {
   marginTop: number;
 }
 
-/** Lines 0..splitAfterLine stay on current page; rest overflow. sourceProseMirrorPos for split transaction. */
+/** Lines 0..splitAfterLine stay on current page; rest overflow. sourceProseMirrorPos for split transaction. resolvedPos set by Phase 10d. */
 export interface PageEntrySplit {
   splitAfterLine: number;
   sourceProseMirrorPos: number;
+  /** ProseMirror doc position at start of first overflow line; set by resolveSplitPositions. */
+  resolvedPos?: number;
 }
 
 /**

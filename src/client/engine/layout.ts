@@ -10,6 +10,8 @@ import {
   MARGIN_BOTTOM,
   PAGE_GAP,
 } from "../../shared/constants";
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
+import { canSplit } from "@tiptap/pm/transform";
 
 /**
  * Per-paragraph data collected in a single DOM read pass for pagination.
@@ -212,6 +214,129 @@ export function computePageEntries(
   }
 
   return entries;
+}
+
+/**
+ * DOM position at (x, y). Uses caretPositionFromPoint with Safari fallback (caretRangeFromPoint).
+ * The +1 on y in callers avoids ambiguity at the exact boundary between two lines.
+ * Returns null if the browser API returns null (e.g. point outside document).
+ */
+function getCaretPosition(
+  x: number,
+  y: number
+): { node: Node; offset: number } | null {
+  if (typeof document.caretPositionFromPoint === "function") {
+    const pos = document.caretPositionFromPoint(x, y);
+    if (!pos) return null;
+    return { node: pos.offsetNode, offset: pos.offset };
+  }
+  const range = document.caretRangeFromPoint(x, y);
+  if (!range) return null;
+  return {
+    node: range.startContainer,
+    offset: range.startOffset,
+  };
+}
+
+/**
+ * Map splitAfterLine to ProseMirror document position for each entry with split !== null.
+ * Uses caretPositionFromPoint at the top-left of the first overflow line, then view.posAtDOM.
+ * Mutates entries in place by setting split.resolvedPos.
+ */
+export function resolveSplitPositions(
+  editor: Editor,
+  pageEntries: PageEntry[]
+): void {
+  const { view } = editor;
+  for (const entry of pageEntries) {
+    const { split } = entry;
+    if (!split || entry.lineRects.length <= split.splitAfterLine + 1) continue;
+    const overflowLineRect = entry.lineRects[split.splitAfterLine + 1];
+    const caret = getCaretPosition(
+      overflowLineRect.left,
+      overflowLineRect.top + 1
+    );
+    if (caret) {
+      split.resolvedPos = view.posAtDOM(caret.node, caret.offset);
+    }
+  }
+}
+
+const MARGIN_STACK = MARGIN_BOTTOM + PAGE_GAP + MARGIN_TOP;
+
+/**
+ * Build LayoutResult from the PageEntry list and the document. Walks doc in lockstep with entries.
+ * Used after splits (with tr.doc) or when there are no splits (with editor.state.doc).
+ */
+export function buildLayoutResultFromEntries(
+  doc: ProseMirrorNode,
+  pageEntries: PageEntry[]
+): LayoutResult {
+  const pageStartPositions: PageStartPosition[] = [];
+  let entryIndex = 0;
+  doc.forEach((node, offset) => {
+    const entry = pageEntries[entryIndex];
+    entryIndex += 1;
+    if (!entry?.decoration) return;
+    pageStartPositions.push({
+      proseMirrorPos: offset,
+      pageNumber: pageStartPositions.length + 2,
+      remainingSpace: entry.decoration.marginTop - MARGIN_STACK,
+    });
+  });
+  return {
+    pageCount: pageStartPositions.length + 1,
+    pageStartPositions,
+  };
+}
+
+/**
+ * Apply split transactions (back-to-front by resolvedPos), set splitId on both halves,
+ * then build LayoutResult from tr.doc and dispatch one transaction with layoutResult meta.
+ * If no entries have split with resolvedPos, only builds and dispatches layoutResult.
+ * Returns the LayoutResult for the caller to update pageCount.
+ */
+export function applySplitsAndDispatchLayout(
+  editor: Editor,
+  pageEntries: PageEntry[]
+): LayoutResult {
+  const { state, schema } = editor;
+  const paragraphType = schema.nodes.paragraph;
+  const splitEntries = pageEntries.filter(
+    (e): e is PageEntry & { split: NonNullable<PageEntry["split"]> } =>
+      e.split !== null && e.split.resolvedPos !== undefined
+  );
+  const sortedSplits = [...splitEntries].sort(
+    (a, b) => (b.split.resolvedPos ?? 0) - (a.split.resolvedPos ?? 0)
+  );
+
+  let tr = state.tr;
+  if (sortedSplits.length > 0) {
+    for (const entry of sortedSplits) {
+      const pos = entry.split.resolvedPos!;
+      if (!canSplit(tr.doc, pos, 1)) continue;
+      const uuid = crypto.randomUUID();
+      tr.split(pos, 1, [
+        { type: paragraphType, attrs: { splitId: uuid } },
+      ]);
+      const $pos = tr.doc.resolve(pos);
+      const nodeBefore = $pos.nodeBefore;
+      if (nodeBefore) {
+        const startBefore = pos - nodeBefore.nodeSize;
+        tr.setNodeMarkup(startBefore, undefined, {
+          ...nodeBefore.attrs,
+          splitId: uuid,
+        });
+      }
+    }
+  }
+
+  const doc = tr.doc;
+  const result = buildLayoutResultFromEntries(doc, pageEntries);
+  editor.view.dispatch(
+    tr.setMeta("layoutResult", result).setMeta("addToHistory", false)
+  );
+  return result;
 }
 
 /**
