@@ -1,6 +1,15 @@
 import type { Editor } from "@tiptap/core";
-import type { LayoutResult, PageStartPosition } from "../../shared/types";
-import { PARAGRAPH_SPACING } from "../../shared/constants";
+import type {
+  LayoutResult,
+  PageStartPosition,
+  PageEntry,
+} from "../../shared/types";
+import {
+  PARAGRAPH_SPACING,
+  MARGIN_TOP,
+  MARGIN_BOTTOM,
+  PAGE_GAP,
+} from "../../shared/constants";
 
 /**
  * Per-paragraph data collected in a single DOM read pass for pagination.
@@ -50,6 +59,159 @@ export function measureParagraphs(editor: Editor): ParagraphMeasurement[] {
   });
 
   return measurements;
+}
+
+/** Sum of heights of a slice of line rects. */
+function sumLineHeights(lineRects: DOMRect[], fromIndex: number, toIndex: number): number {
+  let sum = 0;
+  for (let i = fromIndex; i < toIndex && i < lineRects.length; i++) {
+    sum += lineRects[i].height;
+  }
+  return sum;
+}
+
+/**
+ * Pure pagination walk: build the PageEntry list from measurements. No DOM access.
+ * Handles overflow by splitting at line boundaries and supports cascading splits (paragraph spanning 3+ pages).
+ */
+export function computePageEntries(
+  measurements: ParagraphMeasurement[],
+  contentHeight: number
+): PageEntry[] {
+  const entries: PageEntry[] = [];
+  let accumulatedHeight = 0;
+  const marginStack = MARGIN_BOTTOM + PAGE_GAP + MARGIN_TOP;
+
+  for (const m of measurements) {
+    const { proseMirrorPos, totalHeight, lineRects } = m;
+
+    if (accumulatedHeight + totalHeight <= contentHeight) {
+      entries.push({
+        height: totalHeight,
+        lineRects: [...lineRects],
+        decoration: null,
+        split: null,
+      });
+      accumulatedHeight += totalHeight + PARAGRAPH_SPACING;
+      continue;
+    }
+
+    if (lineRects.length === 0) {
+      // No lines to split; push whole paragraph to next page.
+      entries.push({
+        height: totalHeight,
+        lineRects: [],
+        decoration: {
+          marginTop: contentHeight - accumulatedHeight + marginStack,
+        },
+        split: null,
+      });
+      accumulatedHeight = 0;
+      accumulatedHeight += totalHeight + PARAGRAPH_SPACING;
+      continue;
+    }
+
+    let fittingHeight = 0;
+    let splitAfterLine = -1;
+    for (let i = 0; i < lineRects.length; i++) {
+      const h = fittingHeight + lineRects[i].height;
+      if (accumulatedHeight + h <= contentHeight) {
+        fittingHeight = h;
+        splitAfterLine = i;
+      } else {
+        break;
+      }
+    }
+
+    if (splitAfterLine === -1) {
+      // First line doesn't fit; push whole paragraph to next page.
+      entries.push({
+        height: totalHeight,
+        lineRects: [...lineRects],
+        decoration: {
+          marginTop: contentHeight - accumulatedHeight + marginStack,
+        },
+        split: null,
+      });
+      accumulatedHeight = 0;
+      accumulatedHeight += totalHeight + PARAGRAPH_SPACING;
+      continue;
+    }
+
+    const remainingSpace = contentHeight - accumulatedHeight - fittingHeight;
+    const remainingRects = lineRects.slice(splitAfterLine + 1);
+    const remainingHeight = sumLineHeights(
+      lineRects,
+      splitAfterLine + 1,
+      lineRects.length
+    );
+
+    entries.push({
+      height: fittingHeight,
+      lineRects: lineRects.slice(0, splitAfterLine + 1),
+      decoration: null,
+      split: { splitAfterLine, sourceProseMirrorPos: proseMirrorPos },
+    });
+    accumulatedHeight = 0;
+
+    let overflowHeight = remainingHeight;
+    let overflowRects = remainingRects;
+    let remainingSpaceForDecoration = remainingSpace;
+
+    while (overflowHeight > contentHeight && overflowRects.length > 0) {
+      let ofitHeight = 0;
+      let ofitLast = -1;
+      for (let i = 0; i < overflowRects.length; i++) {
+        const h = ofitHeight + overflowRects[i].height;
+        if (h <= contentHeight) {
+          ofitHeight = h;
+          ofitLast = i;
+        } else {
+          break;
+        }
+      }
+      if (ofitLast === -1) {
+        remainingSpaceForDecoration = contentHeight;
+        entries.push({
+          height: overflowRects[0].height,
+          lineRects: overflowRects.slice(0, 1),
+          decoration: { marginTop: contentHeight + marginStack },
+          split: null,
+        });
+        overflowRects = overflowRects.slice(1);
+        overflowHeight = sumLineHeights(overflowRects, 0, overflowRects.length);
+        continue;
+      }
+      remainingSpaceForDecoration = contentHeight - ofitHeight;
+      entries.push({
+        height: ofitHeight,
+        lineRects: overflowRects.slice(0, ofitLast + 1),
+        decoration: null,
+        split: {
+          splitAfterLine: ofitLast,
+          sourceProseMirrorPos: proseMirrorPos,
+        },
+      });
+      overflowRects = overflowRects.slice(ofitLast + 1);
+      overflowHeight = sumLineHeights(
+        overflowRects,
+        0,
+        overflowRects.length
+      );
+    }
+
+    entries.push({
+      height: overflowHeight,
+      lineRects: overflowRects,
+      decoration: {
+        marginTop: remainingSpaceForDecoration + marginStack,
+      },
+      split: null,
+    });
+    accumulatedHeight = overflowHeight + PARAGRAPH_SPACING;
+  }
+
+  return entries;
 }
 
 /**
