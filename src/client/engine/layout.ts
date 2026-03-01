@@ -2,16 +2,36 @@ import type { Editor } from "@tiptap/core";
 import type { LayoutResult, PageStartPosition } from "../../shared/types";
 import { PARAGRAPH_SPACING } from "../../shared/constants";
 
+/**
+ * Per-paragraph data collected in a single DOM read pass for pagination.
+ * proseMirrorPos is used as split.sourceProseMirrorPos during split transactions.
+ * lineRects from Range.getClientRects() support mid-paragraph split resolution.
+ */
 export interface ParagraphMeasurement {
-  height: number;
-  pmPos: number;
+  proseMirrorPos: number;
+  totalHeight: number;
+  lineRects: DOMRect[];
 }
 
 /**
- * Walk editor.state.doc in lockstep with the live DOM to collect
- * getBoundingClientRect().height and the ProseMirror offset for each
- * top-level node. The offset from doc.forEach is the position needed
- * later for Decoration.node(from, to, …).
+ * Collect per-line client rects for a paragraph element. Works with mixed
+ * inline content (bold, italic, links). Each rect's height reflects the
+ * actual rendered line height. Returns a snapshot (new DOMRects) so layout
+ * can use the data after the DOM read phase without holding live references.
+ */
+function getLineRects(paragraphElement: HTMLElement): DOMRect[] {
+  const range = document.createRange();
+  range.selectNodeContents(paragraphElement);
+  const rects = range.getClientRects();
+  return Array.from(rects).map(
+    (r) => new DOMRect(r.x, r.y, r.width, r.height)
+  );
+}
+
+/**
+ * Walk editor.state.doc in lockstep with the live DOM to collect, in a single
+ * read pass: getBoundingClientRect().height, per-line rects (Range.getClientRects),
+ * and ProseMirror offset for each top-level node.
  */
 export function measureParagraphs(editor: Editor): ParagraphMeasurement[] {
   const { doc } = editor.state;
@@ -22,8 +42,9 @@ export function measureParagraphs(editor: Editor): ParagraphMeasurement[] {
     const dom = view.nodeDOM(offset);
     if (dom instanceof HTMLElement) {
       measurements.push({
-        height: dom.getBoundingClientRect().height,
-        pmPos: offset,
+        proseMirrorPos: offset,
+        totalHeight: dom.getBoundingClientRect().height,
+        lineRects: getLineRects(dom),
       });
     }
   });
@@ -48,25 +69,25 @@ export function computeLayout(
 
   for (const p of measurements) {
     const remainingOnPage = contentHeight - accumulatedHeightOnCurrentPage;
-    const spaceNeeded = p.height + PARAGRAPH_SPACING;
+    const spaceNeeded = p.totalHeight + PARAGRAPH_SPACING;
 
     if (spaceNeeded > remainingOnPage) {
-      if (p.height > remainingOnPage) {
+      if (p.totalHeight > remainingOnPage) {
         console.log("[layout] Straddling paragraph (candidate for mid-paragraph split):", {
-          pmPos: p.pmPos,
-          height: p.height,
+          pmPos: p.proseMirrorPos,
+          height: p.totalHeight,
           remainingOnPage,
         });
       }
       pageStartPositions.push({
-        proseMirrorPos: p.pmPos,
+        proseMirrorPos: p.proseMirrorPos,
         pageNumber: pageCount + 1,
         remainingSpace: remainingOnPage,
       });
       pageCount += 1;
-      accumulatedHeightOnCurrentPage = p.height + PARAGRAPH_SPACING;
+      accumulatedHeightOnCurrentPage = p.totalHeight + PARAGRAPH_SPACING;
     } else {
-      accumulatedHeightOnCurrentPage += p.height + PARAGRAPH_SPACING;
+      accumulatedHeightOnCurrentPage += p.totalHeight + PARAGRAPH_SPACING;
     }
   }
 

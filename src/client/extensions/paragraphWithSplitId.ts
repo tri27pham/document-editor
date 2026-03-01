@@ -7,6 +7,7 @@ import Paragraph from "@tiptap/extension-paragraph";
  *
  * `rendered: false` keeps splitId out of the DOM — it is stored in the document
  * model and in getJSON() but not rendered as an HTML attribute.
+ * getJSON() includes splitId when set, or omits it when null (default).
  */
 export const ParagraphWithSplitId = Paragraph.extend({
   addAttributes() {
