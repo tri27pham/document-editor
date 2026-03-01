@@ -41,7 +41,7 @@ Remaining buffer for debugging, polish, and documentation: 2–6 hours of the 24
 
 - [ ] `shared/constants.ts` — all layout constants from the PRD (PAGE_WIDTH, PAGE_HEIGHT, margins, CONTENT_HEIGHT, PAGE_GAP, PARAGRAPH_SPACING).
 - [ ] `shared/types.ts`:
-  - `EditorDocument`, `Paragraph`, `Run` — document model types. Named `EditorDocument` to avoid shadowing the global DOM `Document` interface.
+  - `EditorDocument` — `id`, `title`, `content` (TipTap `JSONContent`), `created_at`, `updated_at`. Named `EditorDocument` to avoid shadowing the global DOM `Document` interface.
   - `LayoutResult` interface:
     ```typescript
     interface LayoutResult {
@@ -136,18 +136,15 @@ Remaining buffer for debugging, polish, and documentation: 2–6 hours of the 24
 
 ---
 
-## Phase 7: Serialisation + Save/Load UI (2–2.5h)
+## Phase 7: Save/Load UI (1–1.5h)
 
-**Goal:** Save and load documents through the UI with clean round-trip fidelity.
+**Goal:** Save and load documents through the UI with correct round-trip fidelity. No custom serialisation: content is TipTap JSON throughout.
 
-- [ ] **Serialiser:** Convert `editor.getJSON()` → your `EditorDocument` model format. TipTap paragraph nodes → `Paragraph`, text nodes with marks → `Run`. Decorations are not in `getJSON()` so no stripping needed.
-- [ ] **Deserialiser:** Your `EditorDocument` model → TipTap node format, passed to `editor.commands.setContent()`.
-- [ ] **Save button:** Serialise current editor state, POST to backend, display returned ID to user.
-- [ ] **Load input:** Text field for document ID, fetches from backend, deserialises into editor, triggers layout recalculation.
-- [ ] Gate the post-load layout pass on `document.fonts.ready` to ensure deterministic pagination.
+- [ ] **Save button:** Get current state via `editor.getJSON()`, POST `{ title, content }` to backend, display returned ID to user.
+- [ ] **Load input:** Text field for document ID, GET from backend, call `editor.commands.setContent(doc.content)` with the returned `content`. Layout recalculates on the next update (already gated on `document.fonts.ready` for first run).
 - [ ] **Verify the critical path:** Type content across 3+ pages → Save → note the ID → hard refresh the browser → Load by ID → content structure and pagination match.
 
-**This is the most important phase to test thoroughly.** AC-3 is a hard acceptance criterion tested during the live review. Any lossy transformation in the round-trip (whitespace, paragraph order, run boundaries) will be visible.
+AC-3 is tested during the live review. Save/load use the same JSON format; no transformation means no lossy round-trip.
 
 ---
 
@@ -188,44 +185,20 @@ At this point all four acceptance criteria should pass. **Do not proceed to para
 
 ---
 
-## Phase 10: Mid-Paragraph Splitting (4–6h)
+## Phase 10: Line-by-Line Pagination (Mid-Paragraph Splitting)
 
 **Prerequisite:** V1 is stable and all acceptance criteria pass.
 
-### 10a: Line-to-Offset Mapping (1–1.5h)
+The detailed implementation plan for splitting paragraphs at the exact line where they overflow a page boundary (and merging on reflow) lives in **`docs/LINE_BY_LINE_PAGINATION.md`**. It covers:
 
-- [ ] For straddling paragraphs identified during the layout pass (those that don't fit on the current page but are too large to simply push), map the break line's y-coordinate to a text offset within the paragraph.
-- [ ] Use `getClientRects()` on the paragraph's text node to identify individual line y-coordinates, find the line at the page boundary.
-- [ ] Then use `document.caretPositionFromPoint()` (or `caretRangeFromPoint` for WebKit) at the break y-coordinate to get a DOM position, then map to a ProseMirror offset using `editor.view.posAtCoords()`.
-- [ ] Verify: log the offset for a known paragraph and confirm it corresponds to the correct character position.
+- **10a:** Paragraph node spec extension (`splitId` attribute)
+- **10b:** Line-level split point detection (`Range.getClientRects()`, `caretPositionFromPoint`, `view.posAtDOM`)
+- **10c:** Split transaction (UUID, `tr.split`, `addToHistory: false`, cascading splits)
+- **10d:** Merge on reflow (adjacent `splitId` pairs, merge backward, then re-measure)
+- **10e:** Edge cases (3+ page spans, cursor at split, empty second half, mixed formatting)
+- **Merge on save:** Merge `splitId` pairs before sending content to the API so the persisted document has no artificial splits.
 
-### 10b: Split Transaction (1–1.5h)
-
-- [ ] Execute a TipTap/ProseMirror transaction that splits the boundary paragraph at the computed offset.
-- [ ] Use `addToHistory: false` on the transaction to keep undo history clean — users should not undo layout-triggered splits.
-- [ ] Add a custom attribute `continuedFrom: paragraphId` to the second half of the split paragraph to track the relationship.
-- [ ] The second half receives the `margin-top` decoration — same mechanism as V1's whole-paragraph pushing.
-- [ ] Verify: type a long paragraph that crosses a page boundary. It splits visually at the correct line. Cursor behaviour is correct on both halves.
-
-### 10c: Merge on Reflow (1–1.5h)
-
-- [ ] At the start of each layout pass (before measurement), scan for `continuedFrom` paragraph pairs where the split is no longer needed (both halves now fit on the same page).
-- [ ] Merge them back into a single paragraph via a TipTap transaction (`addToHistory: false`).
-- [ ] Handle cascading splits: a paragraph spanning 3+ pages produces multiple splits. The layout pass runs iteratively until no paragraph overflows. This converges because splits only make paragraphs shorter.
-- [ ] Verify: type a long paragraph across a page boundary (splits). Delete content above it so it fits on one page (merges back). Undo/redo still works correctly from the user's perspective.
-
-### 10d: Serialisation Merge (0.5–1h)
-
-- [ ] On save, walk the document tree and detect `continuedFrom` pairs. Merge them back into single paragraphs before serialising to the `EditorDocument` model.
-- [ ] The persisted document never contains artificial splits.
-- [ ] On load, the layout engine computes fresh splits from the flat document model.
-- [ ] Verify the round-trip: save a document with split paragraphs → load → paragraphs are merged in the persisted model → layout engine re-splits them correctly → identical visual result.
-
-### 10e: Edge Cases (0.5h)
-
-- [ ] Paragraph that spans 3 pages (two splits of the same original).
-- [ ] Split paragraph where the user then edits text in the first half, causing the split point to shift.
-- [ ] Cursor positioned at the split point during a reflow — confirm it doesn't jump unexpectedly.
+Estimated time: 4–6h. Follow the phased checklist in that document; keep changes to existing V1 code minimal (see “Changes to Existing V1 Code” table there).
 
 ---
 
@@ -240,7 +213,7 @@ Phase 0 (scaffold)
         │                 └── Phase 5 (overlays)
         │                       └── Phase 8 (polish)
         └── Phase 6 (backend)
-              └── Phase 7 (serialisation + UI)
+              └── Phase 7 (Save/Load UI)
                     └── Phase 8 (polish)
                           └── Phase 9 (docs)
                                 └── ✓ V1 CHECKPOINT

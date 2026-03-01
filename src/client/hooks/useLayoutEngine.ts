@@ -1,12 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import type { Editor } from "@tiptap/core";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
-import { measureParagraphs, computeLayout } from "../engine/layout";
+import type { Transaction } from "@tiptap/pm/state";
+import {
+  mergeSplitParagraphs,
+  measureParagraphs,
+  computePageEntries,
+  resolveSplitPositions,
+  applySplitsAndDispatchLayout,
+} from "../engine/layout";
 import { CONTENT_HEIGHT } from "../../shared/constants";
 
 /**
- * Custom hook that runs the layout engine: measures paragraphs, computes page breaks,
- * dispatches LayoutResult to the plugin, and exposes pageCount.
+ * Custom hook that runs the layout engine: measures paragraphs, computes page entries
+ * (with line-by-line splits when needed), resolves split positions, applies split
+ * transactions and builds LayoutResult, dispatches to the plugin, and exposes pageCount.
  * Uses requestAnimationFrame for scheduling and gates the first run on document.fonts.ready.
  */
 export function useLayoutEngine(editor: Editor | null): number {
@@ -19,13 +27,14 @@ export function useLayoutEngine(editor: Editor | null): number {
     if (!editor) return;
 
     const runLayout = (): void => {
+      mergeSplitParagraphs(editor);
       const measurements = measureParagraphs(editor);
-      const result = computeLayout(measurements, CONTENT_HEIGHT);
+      const pageEntries = computePageEntries(measurements, CONTENT_HEIGHT);
+      resolveSplitPositions(editor, pageEntries);
+
+      const result = applySplitsAndDispatchLayout(editor, pageEntries);
       lastLayoutDocRef.current = editor.state.doc;
       setPageCount(result.pageCount);
-      editor.view.dispatch(
-        editor.state.tr.setMeta("layoutResult", result).setMeta("addToHistory", false)
-      );
     };
 
     const scheduleLayout = (): void => {
@@ -44,10 +53,16 @@ export function useLayoutEngine(editor: Editor | null): number {
       });
     };
 
-    editor.on("update", scheduleLayout);
+    const handleTransaction = ({ transaction }: { transaction: Transaction }): void => {
+      if (transaction.getMeta("layoutResult") !== undefined) return;
+      if (!transaction.docChanged) return;
+      scheduleLayout();
+    };
+
+    editor.on("transaction", handleTransaction);
 
     return () => {
-      editor.off("update", scheduleLayout);
+      editor.off("transaction", handleTransaction);
       if (layoutRafRef.current !== null) {
         cancelAnimationFrame(layoutRafRef.current);
         layoutRafRef.current = null;

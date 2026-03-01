@@ -3,7 +3,7 @@ import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import type { LayoutResult } from "../../shared/types";
-import { MARGIN_BOTTOM, MARGIN_TOP, PAGE_GAP } from "../../shared/constants";
+import { MARGIN_STACK } from "../../shared/constants";
 
 /**
  * Plugin state: layout result (for consumers) and decoration set (mapped across doc changes when layout is stale).
@@ -21,14 +21,13 @@ export const layoutPluginKey = new PluginKey<LayoutPluginState>("layout");
 
 function buildDecorations(layout: LayoutResult, doc: ProseMirrorNode): DecorationSet {
   const decorations: Decoration[] = [];
-  const marginConst = MARGIN_BOTTOM + PAGE_GAP + MARGIN_TOP;
 
   for (const entry of layout.pageStartPositions) {
     const node = doc.nodeAt(entry.proseMirrorPos);
     if (!node) continue;
     const from = entry.proseMirrorPos;
     const to = entry.proseMirrorPos + node.nodeSize;
-    const marginTopPx = entry.remainingSpace + marginConst;
+    const marginTopPx = entry.remainingSpace + MARGIN_STACK;
     decorations.push(
       Decoration.node(from, to, { style: `margin-top: ${marginTopPx}px` })
     );

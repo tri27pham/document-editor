@@ -1,17 +1,104 @@
 import type { Editor } from "@tiptap/core";
-import type { LayoutResult, PageStartPosition } from "../../shared/types";
-import { PARAGRAPH_SPACING } from "../../shared/constants";
+import type {
+  LayoutResult,
+  PageStartPosition,
+  PageEntry,
+  PageEntrySplit,
+} from "../../shared/types";
+import {
+  PARAGRAPH_SPACING,
+  MARGIN_STACK,
+  DEFAULT_LINE_HEIGHT,
+} from "../../shared/constants";
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
+import { canSplit } from "@tiptap/pm/transform";
 
-export interface ParagraphMeasurement {
-  height: number;
-  pmPos: number;
+/**
+ * Merge adjacent paragraphs that share the same splitId (halves of a previous split).
+ * Must run before measurement so we measure the unsplit document and re-split at the correct line.
+ * Merges from end of document backward to keep positions valid. Dispatches with addToHistory: false.
+ * NOTE : CURRENTLY NOT WORKING DUE TO SPLITID BEING NULL IN THE PARAGRAPH NODE
+ */
+export function mergeSplitParagraphs(editor: Editor): boolean {
+  const { state } = editor;
+  const { doc } = state;
+  const positionsToJoin: number[] = [];
+  let docPos = 1;
+  let prev: { node: ProseMirrorNode } | null = null;
+
+  doc.forEach((node: ProseMirrorNode) => {
+    if (
+      prev &&
+      prev.node.type.name === "paragraph" &&
+      node.type.name === "paragraph" &&
+      prev.node.attrs.splitId &&
+      prev.node.attrs.splitId === node.attrs.splitId
+    ) {
+      positionsToJoin.push(docPos);
+    }
+    prev = { node };
+    docPos += node.nodeSize;
+  });
+
+  if (positionsToJoin.length === 0) return false;
+  let tr = state.tr;
+  for (const pos of positionsToJoin.sort((a, b) => b - a)) {
+    const $resolved = tr.doc.resolve(pos);
+    const nodeBefore = $resolved.nodeBefore;
+    const nodeAfter = $resolved.nodeAfter;
+
+    if (nodeBefore && nodeAfter) {
+      tr.join(pos, 1);
+      const $pos = tr.doc.resolve(pos);
+      const nodeBeforeAfter = $pos.nodeBefore;
+      if (nodeBeforeAfter && !nodeBeforeAfter.type.isText) {
+        const startBefore = pos - nodeBeforeAfter.nodeSize;
+        const nodeToUpdate = tr.doc.nodeAt(startBefore);
+        if (nodeToUpdate && !nodeToUpdate.type.isText) {
+          tr.setNodeMarkup(startBefore, undefined, {
+            ...nodeToUpdate.attrs,
+            splitId: null,
+          });
+        }
+      }
+    }
+  }
+  editor.view.dispatch(tr.setMeta("addToHistory", false));
+  return true;
 }
 
 /**
- * Walk editor.state.doc in lockstep with the live DOM to collect
- * getBoundingClientRect().height and the ProseMirror offset for each
- * top-level node. The offset from doc.forEach is the position needed
- * later for Decoration.node(from, to, …).
+ * Per-paragraph data collected in a single DOM read pass for pagination.
+ * proseMirrorPos is used as split.sourceProseMirrorPos during split transactions.
+ * lineRects from Range.getClientRects() support mid-paragraph split resolution.
+ */
+export interface ParagraphMeasurement {
+  proseMirrorPos: number;
+  totalHeight: number;
+  lineRects: DOMRect[];
+}
+
+/**
+ * Collect per-line client rects for a paragraph element. Works with mixed
+ * inline content (bold, italic, links). Each rect's height reflects the
+ * actual rendered line height. Returns a snapshot (new DOMRects) so layout
+ * can use the data after the DOM read phase without holding live references.
+ */
+function getLineRects(paragraphElement: HTMLElement): DOMRect[] {
+  const range = document.createRange();
+  range.selectNodeContents(paragraphElement);
+  const rects = range.getClientRects();
+  return Array.from(rects).map(
+    (r) => new DOMRect(r.x, r.y, r.width, r.height)
+  );
+}
+
+/**
+ * Walk editor.state.doc in lockstep with the live DOM to collect, in a single
+ * read pass: getBoundingClientRect().height, per-line rects (Range.getClientRects),
+ * and ProseMirror offset for each top-level node.
+ * When the DOM node is not yet available (e.g. new paragraph from Enter), uses
+ * DEFAULT_LINE_HEIGHT and empty lineRects so pagination stays in lockstep (one entry per node).
  */
 export function measureParagraphs(editor: Editor): ParagraphMeasurement[] {
   const { doc } = editor.state;
@@ -22,8 +109,15 @@ export function measureParagraphs(editor: Editor): ParagraphMeasurement[] {
     const dom = view.nodeDOM(offset);
     if (dom instanceof HTMLElement) {
       measurements.push({
-        height: dom.getBoundingClientRect().height,
-        pmPos: offset,
+        proseMirrorPos: offset,
+        totalHeight: dom.getBoundingClientRect().height,
+        lineRects: getLineRects(dom),
+      });
+    } else {
+      measurements.push({
+        proseMirrorPos: offset,
+        totalHeight: DEFAULT_LINE_HEIGHT,
+        lineRects: [],
       });
     }
   });
@@ -31,44 +125,308 @@ export function measureParagraphs(editor: Editor): ParagraphMeasurement[] {
   return measurements;
 }
 
+/** Sum of heights of a slice of line rects. */
+function sumLineHeights(lineRects: DOMRect[], fromIndex: number, toIndex: number): number {
+  let sum = 0;
+  for (let i = fromIndex; i < toIndex && i < lineRects.length; i++) {
+    sum += lineRects[i].height;
+  }
+  return sum;
+}
+
 /**
- * Pure layout function: reads paragraph measurements, returns page break positions.
- * Whole-paragraph pushing (V1): when a paragraph doesn't fit on the current page,
- * the entire paragraph moves to the next page. Straddling paragraphs are logged
- * as candidates for future mid-paragraph splitting.
- * Paragraph spacing (PARAGRAPH_SPACING constant) is included so each paragraph reserves height + gap.
+ * Pure pagination walk: build the PageEntry list from measurements. No DOM access.
+ * Handles overflow by splitting at line boundaries and supports cascading splits (paragraph spanning 3+ pages).
  */
-export function computeLayout(
+export function computePageEntries(
   measurements: ParagraphMeasurement[],
   contentHeight: number
-): LayoutResult {
-  let pageCount = 1;
-  let accumulatedHeightOnCurrentPage = 0;
-  const pageStartPositions: PageStartPosition[] = [];
+): PageEntry[] {
+  const entries: PageEntry[] = [];
+  let accumulatedHeight = 0;
 
-  for (const p of measurements) {
-    const remainingOnPage = contentHeight - accumulatedHeightOnCurrentPage;
-    const spaceNeeded = p.height + PARAGRAPH_SPACING;
+  for (const m of measurements) {
+    const { proseMirrorPos, totalHeight, lineRects } = m;
 
-    if (spaceNeeded > remainingOnPage) {
-      if (p.height > remainingOnPage) {
-        console.log("[layout] Straddling paragraph (candidate for mid-paragraph split):", {
-          pmPos: p.pmPos,
-          height: p.height,
-          remainingOnPage,
-        });
-      }
-      pageStartPositions.push({
-        proseMirrorPos: p.pmPos,
-        pageNumber: pageCount + 1,
-        remainingSpace: remainingOnPage,
+    // No split needed
+    if (accumulatedHeight + totalHeight <= contentHeight) {
+      entries.push({
+        height: totalHeight,
+        lineRects: [...lineRects],
+        decoration: null,
+        split: null,
       });
-      pageCount += 1;
-      accumulatedHeightOnCurrentPage = p.height + PARAGRAPH_SPACING;
+      accumulatedHeight += totalHeight + PARAGRAPH_SPACING;
+      continue;
+    }
+
+    // No lines to split; push whole paragraph to next page.
+    if (lineRects.length === 0) {
+      entries.push({
+        height: totalHeight,
+        lineRects: [],
+        decoration: {
+          marginTop: contentHeight - accumulatedHeight + MARGIN_STACK,
+        },
+        split: null,
+      });
+      accumulatedHeight = 0;
+      accumulatedHeight += totalHeight + PARAGRAPH_SPACING;
+      continue;
+    }
+
+    // Find the last line that fits on the current page
+    let fittingHeight = 0;
+    let splitAfterLine = -1;
+    for (let i = 0; i < lineRects.length; i++) {
+      const h = fittingHeight + lineRects[i].height;
+      if (accumulatedHeight + h <= contentHeight) {
+        fittingHeight = h;
+        splitAfterLine = i;
+      } else {
+        break;
+      }
+    }
+
+    // First line doesn't fit, push whole paragraph to next page
+    if (splitAfterLine === -1) {
+      entries.push({
+        height: totalHeight,
+        lineRects: [...lineRects],
+        decoration: {
+          marginTop: contentHeight - accumulatedHeight + MARGIN_STACK,
+        },
+        split: null,
+      });
+      accumulatedHeight = totalHeight + PARAGRAPH_SPACING;
+      continue;
+    }
+
+    // Split the paragraph at the last line that fits
+    const remainingSpace = contentHeight - accumulatedHeight - fittingHeight;
+    const remainingRects = lineRects.slice(splitAfterLine + 1);
+    const remainingHeight = sumLineHeights(
+      lineRects,
+      splitAfterLine + 1,
+      lineRects.length
+    );
+
+    // Add the first part of the paragraph to the current page with split ID
+    const splitId = crypto.randomUUID();
+    entries.push({
+      height: fittingHeight,
+      lineRects: lineRects.slice(0, splitAfterLine + 1),
+      decoration: null,
+      split: { splitAfterLine, sourceProseMirrorPos: proseMirrorPos, splitId: splitId },
+    });
+    accumulatedHeight = 0;
+
+
+    let overflowHeight = remainingHeight;
+    let overflowRects = remainingRects;
+    let remainingSpaceForDecoration = remainingSpace;
+
+    // Handle case where multiple splits are needed
+    while (overflowHeight > contentHeight && overflowRects.length > 0) {
+      let overflowFittingHeight = 0;
+      let overflowFittingLastIndex = -1;
+      for (let i = 0; i < overflowRects.length; i++) {
+        const h = overflowFittingHeight + overflowRects[i].height;
+        if (h <= contentHeight) {
+          overflowFittingHeight = h;
+          overflowFittingLastIndex = i;
+        } else {
+          break;
+        }
+      }
+      if (overflowFittingLastIndex === -1) {
+        remainingSpaceForDecoration = contentHeight;
+        entries.push({
+          height: overflowRects[0].height,
+          lineRects: overflowRects.slice(0, 1),
+          decoration: { marginTop: contentHeight + MARGIN_STACK },
+          split: null,
+        });
+        overflowRects = overflowRects.slice(1);
+        overflowHeight = sumLineHeights(overflowRects, 0, overflowRects.length);
+        continue;
+      }
+      remainingSpaceForDecoration = contentHeight - overflowFittingHeight;
+      entries.push({
+        height: overflowFittingHeight,
+        lineRects: overflowRects.slice(0, overflowFittingLastIndex + 1),
+        decoration: null,
+        split: {
+          splitAfterLine: overflowFittingLastIndex,
+          sourceProseMirrorPos: proseMirrorPos,
+          splitId,
+        },
+      });
+      overflowRects = overflowRects.slice(overflowFittingLastIndex + 1);
+      overflowHeight = sumLineHeights(
+        overflowRects,
+        0,
+        overflowRects.length
+      );
+    }
+
+    // Add the last part of the paragraph to the next page with split ID
+    entries.push({
+      height: overflowHeight,
+      lineRects: overflowRects,
+      decoration: {
+        marginTop: remainingSpaceForDecoration + MARGIN_STACK,
+      },
+      split: { splitAfterLine, sourceProseMirrorPos: proseMirrorPos, splitId: splitId },
+    });
+    accumulatedHeight = overflowHeight + PARAGRAPH_SPACING;
+  }
+
+  return entries;
+}
+
+/**
+ * DOM position at (x, y). Uses caretPositionFromPoint with Safari fallback (caretRangeFromPoint).
+ * The +1 on y in callers avoids ambiguity at the exact boundary between two lines.
+ * Returns null if the browser API returns null (e.g. point outside document).
+ */
+function getCaretPosition(
+  x: number,
+  y: number
+): { node: Node; offset: number } | null {
+  if (typeof document.caretPositionFromPoint === "function") {
+    const pos = document.caretPositionFromPoint(x, y);
+    if (!pos) return null;
+    return { node: pos.offsetNode, offset: pos.offset };
+  }
+  const range = document.caretRangeFromPoint(x, y);
+  if (!range) return null;
+  return {
+    node: range.startContainer,
+    offset: range.startOffset,
+  };
+}
+
+/**
+ * Map splitAfterLine to ProseMirror document position for each entry with split !== null.
+ * Uses caretPositionFromPoint at the top-left of the first overflow line, then view.posAtDOM.
+ * Mutates entries in place by setting split.resolvedPos.
+ * The split entry only has fitting lineRects; the first overflow line is in the next entry's lineRects[0].
+ */
+export function resolveSplitPositions(
+  editor: Editor,
+  pageEntries: PageEntry[]
+): void {
+  const { view, state } = editor;
+  const { doc } = state;
+  for (let i = 0; i < pageEntries.length; i++) {
+    const entry = pageEntries[i];
+    const { split } = entry;
+    if (!split) continue;
+    let overflowLineRect: DOMRect | undefined;
+    if (entry.lineRects.length > split.splitAfterLine + 1) {
+      overflowLineRect = entry.lineRects[split.splitAfterLine + 1];
     } else {
-      accumulatedHeightOnCurrentPage += p.height + PARAGRAPH_SPACING;
+      const nextEntry = pageEntries[i + 1];
+      if (nextEntry?.lineRects?.length) overflowLineRect = nextEntry.lineRects[0];
+    }
+    if (!overflowLineRect) continue;
+    const caret = getCaretPosition(
+      overflowLineRect.left,
+      overflowLineRect.top + 1
+    );
+    if (!caret) continue;
+    const pos = view.posAtDOM(caret.node, caret.offset);
+    // Only accept resolvedPos if it lies inside the paragraph we're splitting.
+    const src = split.sourceProseMirrorPos;
+    const $src = doc.resolve(src);
+    const para = $src.nodeAfter;
+    if (para && pos > src && pos < src + para.nodeSize) {
+      split.resolvedPos = pos;
+    }
+  }
+}
+
+/**
+ * Build LayoutResult from the PageEntry list and the document. Walks doc in lockstep with entries.
+ * Used after splits (with tr.doc) or when there are no splits (with editor.state.doc).
+ */
+export function buildLayoutResultFromEntries(
+  doc: ProseMirrorNode,
+  pageEntries: PageEntry[]
+): LayoutResult {
+  const pageStartPositions: PageStartPosition[] = [];
+  let entryIndex = 0;
+  doc.forEach((node, offset) => {
+    const entry = pageEntries[entryIndex];
+    entryIndex += 1;
+    if (!entry?.decoration) return;
+    pageStartPositions.push({
+      proseMirrorPos: offset,
+      pageNumber: pageStartPositions.length + 2,
+      remainingSpace: entry.decoration.marginTop - MARGIN_STACK,
+    });
+  });
+  return {
+    pageCount: pageStartPositions.length + 1,
+    pageStartPositions,
+  };
+}
+
+/**
+ * Apply split transactions (back-to-front by resolvedPos), set splitId on both halves,
+ * then build LayoutResult from tr.doc and dispatch one transaction with layoutResult meta.
+ * If no entries have split with resolvedPos, only builds and dispatches layoutResult.
+ * Returns the LayoutResult for the caller to update pageCount.
+ */
+export function applySplitsAndDispatchLayout(
+  editor: Editor,
+  pageEntries: PageEntry[]
+): LayoutResult {
+  const { state, schema } = editor;
+  const paragraphType = schema.nodes.paragraph;
+  const splitEntries = pageEntries.filter(
+    (e): e is PageEntry & { split: NonNullable<PageEntrySplit> & { resolvedPos: number; splitId: string } } =>
+      e.split !== null &&
+      e.split.resolvedPos !== undefined &&
+      e.split.splitId != null
+  );
+  const sortedSplits = [...splitEntries].sort(
+    (a, b) => (b.split.resolvedPos ?? 0) - (a.split.resolvedPos ?? 0)
+  );
+
+  let tr = state.tr;
+  if (sortedSplits.length > 0) {
+    for (const entry of sortedSplits) {
+      const pos = entry.split.resolvedPos!;
+      const mappedSource = entry.split.sourceProseMirrorPos;
+      const splitId = entry.split.splitId!;
+      if (!canSplit(tr.doc, pos, 1)) continue;
+      tr.split(pos, 1, [
+        { type: paragraphType, attrs: { splitId } },
+      ]);
+
+      let offset = 1;
+      for (let j = 0; j < tr.doc.childCount; j++) {
+        const node = tr.doc.child(j);
+        if (offset === mappedSource) {
+          if (node.type.name === "paragraph") {
+            tr.setNodeMarkup(offset, undefined, {
+              ...node.attrs,
+              splitId,
+            });
+          }
+          break;
+        }
+        offset += node.nodeSize;
+      }
     }
   }
 
-  return { pageCount, pageStartPositions };
+  const doc = tr.doc;
+  const result = buildLayoutResultFromEntries(doc, pageEntries);
+  editor.view.dispatch(
+    tr.setMeta("layoutResult", result).setMeta("addToHistory", false)
+  );
+  return result;
 }

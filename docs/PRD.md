@@ -57,19 +57,13 @@ TipTap is the single visible editing surface. The layout engine reads from TipTa
 - TipTap's native editing behaviour (cursor, selection, caret, keyboard navigation) works without modification.
 - No parallel DOMs, no coordinate translation, no cursor mapping.
 - Decorations are visual-only — they don't exist in `getJSON()`, don't affect undo/redo, and don't interact with editing operations.
-- Serialisation is clean: save/load round-trip is trivially correct.
+- Persistence is trivial: save sends `editor.getJSON()` as `content`; load calls `editor.commands.setContent(doc.content)`. No custom serialisation layer.
 
 **Key tradeoff:** The DOM approach requires two-pass measurement (browser renders first, then we read positions), making pagination reactive rather than predictive. This is the fundamental cost of delegating line-breaking to the browser.
 
 ### Document Model
-Flat array of paragraphs, each containing runs of text with styling. Single source of truth, never split at the data level.
 
-```
-Document
-  └── Paragraph[]
-        └── Run[]
-              └── { text, style }
-```
+The persisted document uses TipTap/ProseMirror JSON: `content` is `JSONContent` (the output of `editor.getJSON()`). The backend stores `{ id, title, content, created_at, updated_at }` as-is. No separate paragraph/run schema or custom serialisation; the editor state is the source of truth.
 
 ### Layout Engine (Pure Function)
 
@@ -212,7 +206,7 @@ These are taken directly from the spec and will be tested during the live review
 **Additional complexity:**
 - **Merge tracking:** A custom paragraph attribute (`continuedFrom: paragraphId`) tracks which paragraph pairs are split halves of the same original.
 - **Merge on reflow:** On each layout pass, check whether previously split paragraphs can be reunified before measuring (e.g., user deleted content and the split is no longer needed).
-- **Serialisation merge:** On save, walk the document tree, detect `continuedFrom` pairs, and merge them back into single paragraphs before serialising. The persisted document model never contains artificial splits.
+- **Merge on save:** On save, walk the document tree, detect `continuedFrom` pairs, and merge them back into single paragraphs before sending to the API. The persisted document never contains artificial splits.
 - **Cascading splits:** A paragraph spanning 3+ pages requires iterative splitting until no paragraph overflows. Converges because each split only makes paragraphs shorter.
 - **Cursor preservation:** Verify cursor position is maintained through programmatic splits, particularly when the cursor is in the second half after a split.
 
@@ -232,7 +226,7 @@ These are taken directly from the spec and will be tested during the live review
 - **Mid-paragraph splitting:** Native to this model — split at the overflow point in page N, create continuation at top of page N+1. Track split relationships for merge on backflow.
 - **Cursor transitions:** Intercept ArrowDown/ArrowUp at page boundaries, focus the adjacent editor, place cursor at the corresponding position. Click-to-focus on any page.
 - **Cross-page selection:** Either fake it with coordinated decorations across editors, or scope selection to single pages (acceptable for most use cases).
-- **Serialisation:** PageManager walks all editors, calls `getJSON()` on each, concatenates content arrays, merges split paragraphs. Document model stays flat — page splits are never persisted.
+- **Persistence:** PageManager walks all editors, calls `getJSON()` on each, concatenates content arrays, merges split paragraphs. Document model stays TipTap JSON — page splits are never persisted.
 
 **Performance characteristics:**
 - Memory scales linearly (~2–5MB per TipTap instance). Fine for 5–20 pages; requires virtualisation (mount only visible pages) beyond that.
@@ -249,7 +243,7 @@ These are taken directly from the spec and will be tested during the live review
 | Risk | Impact | Likelihood | Mitigation |
 |------|--------|------------|------------|
 | Measurement-decoration feedback loop (decoration margins invalidate measurements) | High — visual glitches during demo | Medium | Decorations applied after measurement; margin only affects content below the decoration point; subsequent pages measured accounting for margin |
-| Save/load round-trip lossy | High — direct acceptance criteria failure | Medium | Decorations don't exist in document model; explicit round-trip test during development |
+| Save/load round-trip lossy | High — direct acceptance criteria failure | Medium | No custom serialisation; save/load use getJSON/setContent directly; decorations not in document; explicit round-trip test during development |
 | Font not loaded before initial measurement | High — incorrect pagination on reload | Medium | Gate first layout pass on `document.fonts.ready` |
 | Architecture doc exceeds 2-page limit | Low — poor impression | High | Compress: one paragraph on approach rationale, focus on edit cycle and layout engine, keep persistence section minimal |
 | Very long paragraph exceeding page height | Medium — visual break | Low | Note as known limitation; spec content is plain text, unlikely to occur during demo |

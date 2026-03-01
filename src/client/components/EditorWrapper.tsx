@@ -6,13 +6,18 @@ import {
   useCurrentEditor,
 } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
+import { ParagraphWithSplitId } from "../extensions/paragraphWithSplitId";
 import { LayoutPlugin } from "../extensions/layoutPlugin";
 import { PageOverlay } from "./PageOverlay";
 import { Toolbar } from "./Toolbar";
 import { useLayoutEngine } from "../hooks/useLayoutEngine";
 
-const extensions = [StarterKit, LayoutPlugin];
-const initialContent = "<p>Start typing…</p>";
+const extensions = [
+  StarterKit.configure({ paragraph: false }),
+  ParagraphWithSplitId,
+  LayoutPlugin,
+];
+const initialContent = "";
 
 /**
  * Renders PageOverlay with pageCount from the layout engine.

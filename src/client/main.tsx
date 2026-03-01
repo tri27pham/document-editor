@@ -6,8 +6,8 @@ import "./styles.css";
 
 initCssVars();
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
+const rootEl = document.getElementById("root");
+if (!rootEl) throw new Error("Root element #root not found.");
+createRoot(rootEl).render(
     <App />
-  </StrictMode>
 );
