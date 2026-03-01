@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import type { Editor } from "@tiptap/core";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import {
+  mergeSplitParagraphs,
   measureParagraphs,
   computePageEntries,
   resolveSplitPositions,
   applySplitsAndDispatchLayout,
+  logParagraphsPerPage,
 } from "../engine/layout";
 import { CONTENT_HEIGHT } from "../../shared/constants";
 
@@ -20,21 +22,32 @@ export function useLayoutEngine(editor: Editor | null): number {
   const layoutRafRef = useRef<number | null>(null);
   const firstLayoutDoneRef = useRef(false);
   const lastLayoutDocRef = useRef<ProseMirrorNode | null>(null);
+  /** When true, the next "update" is from our own layout dispatch (splits); skip scheduling to avoid double run. */
+  const skipNextScheduleRef = useRef(false);
 
   useEffect(() => {
     if (!editor) return;
 
     const runLayout = (): void => {
+      mergeSplitParagraphs(editor);
       const measurements = measureParagraphs(editor);
       const pageEntries = computePageEntries(measurements, CONTENT_HEIGHT);
-      console.log("[layout] pageEntries", pageEntries);
       resolveSplitPositions(editor, pageEntries);
+
+      skipNextScheduleRef.current = true;
       const result = applySplitsAndDispatchLayout(editor, pageEntries);
       lastLayoutDocRef.current = editor.state.doc;
       setPageCount(result.pageCount);
+      // if (process.env.NODE_ENV === "development") {
+      //   logParagraphsPerPage(editor.state.doc, result);
+      // }
     };
 
     const scheduleLayout = (): void => {
+      if (skipNextScheduleRef.current) {
+        skipNextScheduleRef.current = false;
+        return;
+      }
       if (editor.state.doc === lastLayoutDocRef.current) return;
       if (layoutRafRef.current !== null) cancelAnimationFrame(layoutRafRef.current);
       layoutRafRef.current = requestAnimationFrame(() => {

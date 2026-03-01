@@ -14,6 +14,69 @@ import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { canSplit } from "@tiptap/pm/transform";
 
 /**
+ * Merge adjacent paragraphs that share the same splitId (halves of a previous split).
+ * Must run before measurement so we measure the unsplit document and re-split at the correct line.
+ * Merges from end of document backward to keep positions valid. Dispatches with addToHistory: false.
+ */
+export function mergeSplitParagraphs(editor: Editor): boolean {
+  const { state } = editor;
+  const { doc } = state;
+  const positionsToJoin: number[] = [];
+  let docPos = 1;
+  let prev: { node: ProseMirrorNode } | null = null;
+  let paragraphCount = 0;
+  let withSplitId: { splitId: unknown; index: number }[] = [];
+
+  doc.forEach((node: ProseMirrorNode) => {
+    console.log("node", node);
+    if (
+      prev &&
+      prev.node.type.name === "paragraph" &&
+      node.type.name === "paragraph" &&
+      prev.node.attrs.splitId &&
+      prev.node.attrs.splitId === node.attrs.splitId
+    ) {
+      positionsToJoin.push(docPos);
+    }
+    prev = { node };
+    docPos += node.nodeSize;
+  });
+
+  // console.log("positionsToJoin", positionsToJoin);
+
+  if (positionsToJoin.length === 0) return false;
+  let tr = state.tr;
+  let joinsDone = 0;
+  for (const pos of positionsToJoin.sort((a, b) => b - a)) {
+    const $resolved = tr.doc.resolve(pos);
+    const nodeBefore = $resolved.nodeBefore;
+    const nodeAfter = $resolved.nodeAfter;
+
+    if (nodeBefore && nodeAfter) {
+      tr.join(pos, 1);
+      joinsDone++;
+      const $pos = tr.doc.resolve(pos);
+      const nodeBeforeAfter = $pos.nodeBefore;
+      if (nodeBeforeAfter && !nodeBeforeAfter.type.isText) {
+        const startBefore = pos - nodeBeforeAfter.nodeSize;
+        const nodeToUpdate = tr.doc.nodeAt(startBefore);
+        if (nodeToUpdate && !nodeToUpdate.type.isText) {
+          tr.setNodeMarkup(startBefore, undefined, {
+            ...nodeToUpdate.attrs,
+            splitId: null,
+          });
+        }
+      }
+    }
+  }
+  // #region agent log
+  fetch('http://127.0.0.1:7268/ingest/2f1061ae-7d54-45f2-957d-c07d266411cf',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'648227'},body:JSON.stringify({sessionId:'648227',location:'layout.ts:mergeSplitParagraphs:dispatch',message:'dispatching merge tr',data:{joinsDone,stepsCount:tr.steps.length},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
+  editor.view.dispatch(tr.setMeta("addToHistory", false));
+  return true;
+}
+
+/**
  * Per-paragraph data collected in a single DOM read pass for pagination.
  * proseMirrorPos is used as split.sourceProseMirrorPos during split transactions.
  * lineRects from Range.getClientRects() support mid-paragraph split resolution.
@@ -140,6 +203,7 @@ export function computePageEntries(
       continue;
     }
 
+
     const remainingSpace = contentHeight - accumulatedHeight - fittingHeight;
     const remainingRects = lineRects.slice(splitAfterLine + 1);
     const remainingHeight = sumLineHeights(
@@ -148,13 +212,15 @@ export function computePageEntries(
       lineRects.length
     );
 
+    const splitId = crypto.randomUUID();
     entries.push({
       height: fittingHeight,
       lineRects: lineRects.slice(0, splitAfterLine + 1),
       decoration: null,
-      split: { splitAfterLine, sourceProseMirrorPos: proseMirrorPos },
+      split: { splitAfterLine, sourceProseMirrorPos: proseMirrorPos, splitId: splitId },
     });
     accumulatedHeight = 0;
+
 
     let overflowHeight = remainingHeight;
     let overflowRects = remainingRects;
@@ -192,6 +258,7 @@ export function computePageEntries(
         split: {
           splitAfterLine: ofitLast,
           sourceProseMirrorPos: proseMirrorPos,
+          splitId,
         },
       });
       overflowRects = overflowRects.slice(ofitLast + 1);
@@ -208,7 +275,7 @@ export function computePageEntries(
       decoration: {
         marginTop: remainingSpaceForDecoration + marginStack,
       },
-      split: null,
+      split: { splitAfterLine, sourceProseMirrorPos: proseMirrorPos, splitId: splitId },
     });
     accumulatedHeight = overflowHeight + PARAGRAPH_SPACING;
   }
@@ -248,7 +315,8 @@ export function resolveSplitPositions(
   editor: Editor,
   pageEntries: PageEntry[]
 ): void {
-  const { view } = editor;
+  const { view, state } = editor;
+  const { doc } = state;
   for (let i = 0; i < pageEntries.length; i++) {
     const entry = pageEntries[i];
     const { split } = entry;
@@ -265,13 +333,54 @@ export function resolveSplitPositions(
       overflowLineRect.left,
       overflowLineRect.top + 1
     );
-    if (caret) {
-      split.resolvedPos = view.posAtDOM(caret.node, caret.offset);
+    if (!caret) continue;
+    const pos = view.posAtDOM(caret.node, caret.offset);
+    // Only accept resolvedPos if it lies inside the paragraph we're splitting.
+    const src = split.sourceProseMirrorPos;
+    const $src = doc.resolve(src);
+    const para = $src.nodeAfter;
+    if (para && pos > src && pos < src + para.nodeSize) {
+      split.resolvedPos = pos;
     }
   }
 }
 
 const MARGIN_STACK = MARGIN_BOTTOM + PAGE_GAP + MARGIN_TOP;
+
+/**
+ * Debug helper: log which paragraphs (by position, text snippet, and splitId) appear on each page.
+ * Call after layout is computed; uses LayoutResult.pageStartPositions to partition the doc.
+ */
+export function logParagraphsPerPage(
+  doc: ProseMirrorNode,
+  result: LayoutResult,
+  maxSnippetLen = 60
+): void {
+  const pageStarts = [1, ...result.pageStartPositions.map((p) => p.proseMirrorPos)];
+  const byPage: {
+    pageNumber: number;
+    paragraphs: { pos: number; text: string; splitId: string | null }[];
+  }[] = [];
+
+  for (let i = 0; i < pageStarts.length; i++) {
+    const start = pageStarts[i];
+    const end = pageStarts[i + 1] ?? Number.MAX_SAFE_INTEGER;
+    const paragraphs: { pos: number; text: string; splitId: string | null }[] = [];
+    doc.forEach((node, offset) => {
+      if (offset >= start && offset < end) {
+        const text = node.textContent?.slice(0, maxSnippetLen) ?? "";
+        const splitId =
+          node.type.name === "paragraph" && node.attrs.splitId != null
+            ? String(node.attrs.splitId)
+            : null;
+        paragraphs.push({ pos: offset, text: text || "(empty)", splitId });
+      }
+    });
+    byPage.push({ pageNumber: i + 1, paragraphs });
+  }
+
+  console.log("[layout] Paragraphs per page:", byPage);
+}
 
 /**
  * Build LayoutResult from the PageEntry list and the document. Walks doc in lockstep with entries.
@@ -312,8 +421,10 @@ export function applySplitsAndDispatchLayout(
   const { state, schema } = editor;
   const paragraphType = schema.nodes.paragraph;
   const splitEntries = pageEntries.filter(
-    (e): e is PageEntry & { split: NonNullable<PageEntry["split"]> } =>
-      e.split !== null && e.split.resolvedPos !== undefined
+    (e): e is PageEntry & { split: NonNullable<PageEntry["split"]> & { resolvedPos: number; splitId: string } } =>
+      e.split !== null &&
+      e.split.resolvedPos !== undefined &&
+      e.split.splitId != null
   );
   const sortedSplits = [...splitEntries].sort(
     (a, b) => (b.split.resolvedPos ?? 0) - (a.split.resolvedPos ?? 0)
@@ -323,27 +434,27 @@ export function applySplitsAndDispatchLayout(
   if (sortedSplits.length > 0) {
     for (const entry of sortedSplits) {
       const pos = entry.split.resolvedPos!;
+      const mappedSource = entry.split.sourceProseMirrorPos;
+      const splitId = entry.split.splitId!;
       if (!canSplit(tr.doc, pos, 1)) continue;
-      const uuid = crypto.randomUUID();
       tr.split(pos, 1, [
-        { type: paragraphType, attrs: { splitId: uuid } },
+        { type: paragraphType, attrs: { splitId } },
       ]);
-      const $pos = tr.doc.resolve(pos);
-      const nodeBefore = $pos.nodeBefore;
-      if (nodeBefore) {
-        let startBefore: number;
-        if (nodeBefore.type.isText) {
-          startBefore = $pos.start($pos.depth - 1);
-        } else {
-          startBefore = pos - nodeBefore.nodeSize;
+
+      let offset = 1;
+      for (let j = 0; j < tr.doc.childCount; j++) {
+        const node = tr.doc.child(j);
+        if (offset === mappedSource) {
+          if (node.type.name === "paragraph") {
+            tr.setNodeMarkup(offset, undefined, {
+              ...node.attrs,
+              splitId,
+            });
+          }
+          console.log("node", node);
+          break;
         }
-        const nodeToUpdate = tr.doc.nodeAt(startBefore);
-        if (nodeToUpdate && !nodeToUpdate.type.isText) {
-          tr.setNodeMarkup(startBefore, undefined, {
-            ...nodeToUpdate.attrs,
-            splitId: uuid,
-          });
-        }
+        offset += node.nodeSize;
       }
     }
   }
