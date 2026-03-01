@@ -14,11 +14,11 @@ export function Toolbar() {
     setError(null);
     try {
       const json = editor.getJSON();
-      const res = (await saveDocument({
+      const res = await saveDocument({
         id: documentId || undefined,
         title: title || "Untitled",
         content: json,
-      })) as { id: string };
+      });
       setDocumentId(res.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
@@ -29,13 +29,10 @@ export function Toolbar() {
     if (!editor || !loadId.trim()) return;
     setError(null);
     try {
-      const doc = (await load(loadId.trim())) as {
-        title?: string;
-        content?: unknown;
-      };
+      const doc = await load(loadId.trim());
       if (doc.title != null) setTitle(String(doc.title));
-      if (doc.content != null) editor.commands.setContent(doc.content);
-      setDocumentId(loadId.trim());
+      editor.commands.setContent(doc.content);
+      setDocumentId(doc.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     }

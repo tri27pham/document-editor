@@ -2,7 +2,32 @@ import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
-import type { LayoutResult } from "../../shared/types";
+import type { LayoutResult, PageStartPosition } from "../../shared/types";
+
+function isPageStartPosition(v: unknown): v is PageStartPosition {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    "proseMirrorPos" in v &&
+    "pageNumber" in v &&
+    "remainingSpace" in v &&
+    typeof (v as PageStartPosition).proseMirrorPos === "number" &&
+    typeof (v as PageStartPosition).pageNumber === "number" &&
+    typeof (v as PageStartPosition).remainingSpace === "number"
+  );
+}
+
+function isLayoutResult(meta: unknown): meta is LayoutResult {
+  return (
+    typeof meta === "object" &&
+    meta !== null &&
+    "pageCount" in meta &&
+    "pageStartPositions" in meta &&
+    typeof (meta as LayoutResult).pageCount === "number" &&
+    Array.isArray((meta as LayoutResult).pageStartPositions) &&
+    (meta as LayoutResult).pageStartPositions.every(isPageStartPosition)
+  );
+}
 import { MARGIN_BOTTOM, MARGIN_TOP, PAGE_GAP } from "../../shared/constants";
 
 /**
@@ -54,7 +79,8 @@ export const LayoutPlugin = Extension.create({
           apply(tr, value, _oldState, newState): LayoutPluginState {
             const meta = tr.getMeta("layoutResult");
             if (meta !== undefined) {
-              const layoutResult = meta as LayoutResult;
+              if (!isLayoutResult(meta)) return value;
+              const layoutResult = meta;
               const decorations = buildDecorations(layoutResult, newState.doc);
               return { layoutResult, decorations };
             }
