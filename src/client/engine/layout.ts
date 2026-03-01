@@ -242,16 +242,25 @@ function getCaretPosition(
  * Map splitAfterLine to ProseMirror document position for each entry with split !== null.
  * Uses caretPositionFromPoint at the top-left of the first overflow line, then view.posAtDOM.
  * Mutates entries in place by setting split.resolvedPos.
+ * The split entry only has fitting lineRects; the first overflow line is in the next entry's lineRects[0].
  */
 export function resolveSplitPositions(
   editor: Editor,
   pageEntries: PageEntry[]
 ): void {
   const { view } = editor;
-  for (const entry of pageEntries) {
+  for (let i = 0; i < pageEntries.length; i++) {
+    const entry = pageEntries[i];
     const { split } = entry;
-    if (!split || entry.lineRects.length <= split.splitAfterLine + 1) continue;
-    const overflowLineRect = entry.lineRects[split.splitAfterLine + 1];
+    if (!split) continue;
+    let overflowLineRect: DOMRect | undefined;
+    if (entry.lineRects.length > split.splitAfterLine + 1) {
+      overflowLineRect = entry.lineRects[split.splitAfterLine + 1];
+    } else {
+      const nextEntry = pageEntries[i + 1];
+      if (nextEntry?.lineRects?.length) overflowLineRect = nextEntry.lineRects[0];
+    }
+    if (!overflowLineRect) continue;
     const caret = getCaretPosition(
       overflowLineRect.left,
       overflowLineRect.top + 1
