@@ -4,7 +4,7 @@ import { randomUUID } from "crypto";
 import type { EditorDocument } from "../shared/types";
 
 const app = express();
-const PORT = 3001;
+const PORT = Number(process.env.PORT) || 3001;
 
 app.use(cors());
 app.use(express.json());
@@ -24,7 +24,11 @@ app.post("/documents", (req, res) => {
   const now = new Date().toISOString();
 
   if (bodyId != null && typeof bodyId === "string" && documents.has(bodyId)) {
-    const existing = documents.get(bodyId)!;
+    const existing = documents.get(bodyId);
+    if (!existing) {
+      res.status(500).json({ error: "Document state inconsistent" });
+      return;
+    }
     const updated: EditorDocument = {
       ...existing,
       title: String(title),

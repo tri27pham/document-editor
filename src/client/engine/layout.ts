@@ -6,9 +6,7 @@ import type {
 } from "../../shared/types";
 import {
   PARAGRAPH_SPACING,
-  MARGIN_TOP,
-  MARGIN_BOTTOM,
-  PAGE_GAP,
+  MARGIN_STACK,
   DEFAULT_LINE_HEIGHT,
 } from "../../shared/constants";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
@@ -42,7 +40,6 @@ export function mergeSplitParagraphs(editor: Editor): boolean {
 
   if (positionsToJoin.length === 0) return false;
   let tr = state.tr;
-  let joinsDone = 0;
   for (const pos of positionsToJoin.sort((a, b) => b - a)) {
     const $resolved = tr.doc.resolve(pos);
     const nodeBefore = $resolved.nodeBefore;
@@ -50,7 +47,6 @@ export function mergeSplitParagraphs(editor: Editor): boolean {
 
     if (nodeBefore && nodeAfter) {
       tr.join(pos, 1);
-      joinsDone++;
       const $pos = tr.doc.resolve(pos);
       const nodeBeforeAfter = $pos.nodeBefore;
       if (nodeBeforeAfter && !nodeBeforeAfter.type.isText) {
@@ -146,7 +142,6 @@ export function computePageEntries(
 ): PageEntry[] {
   const entries: PageEntry[] = [];
   let accumulatedHeight = 0;
-  const marginStack = MARGIN_BOTTOM + PAGE_GAP + MARGIN_TOP;
 
   for (const m of measurements) {
     const { proseMirrorPos, totalHeight, lineRects } = m;
@@ -168,7 +163,7 @@ export function computePageEntries(
         height: totalHeight,
         lineRects: [],
         decoration: {
-          marginTop: contentHeight - accumulatedHeight + marginStack,
+          marginTop: contentHeight - accumulatedHeight + MARGIN_STACK,
         },
         split: null,
       });
@@ -195,12 +190,11 @@ export function computePageEntries(
         height: totalHeight,
         lineRects: [...lineRects],
         decoration: {
-          marginTop: contentHeight - accumulatedHeight + marginStack,
+          marginTop: contentHeight - accumulatedHeight + MARGIN_STACK,
         },
         split: null,
       });
-      accumulatedHeight = 0;
-      accumulatedHeight += totalHeight + PARAGRAPH_SPACING;
+      accumulatedHeight = totalHeight + PARAGRAPH_SPACING;
       continue;
     }
 
@@ -228,41 +222,41 @@ export function computePageEntries(
     let remainingSpaceForDecoration = remainingSpace;
 
     while (overflowHeight > contentHeight && overflowRects.length > 0) {
-      let ofitHeight = 0;
-      let ofitLast = -1;
+      let overflowFittingHeight = 0;
+      let overflowFittingLastIndex = -1;
       for (let i = 0; i < overflowRects.length; i++) {
-        const h = ofitHeight + overflowRects[i].height;
+        const h = overflowFittingHeight + overflowRects[i].height;
         if (h <= contentHeight) {
-          ofitHeight = h;
-          ofitLast = i;
+          overflowFittingHeight = h;
+          overflowFittingLastIndex = i;
         } else {
           break;
         }
       }
-      if (ofitLast === -1) {
+      if (overflowFittingLastIndex === -1) {
         remainingSpaceForDecoration = contentHeight;
         entries.push({
           height: overflowRects[0].height,
           lineRects: overflowRects.slice(0, 1),
-          decoration: { marginTop: contentHeight + marginStack },
+          decoration: { marginTop: contentHeight + MARGIN_STACK },
           split: null,
         });
         overflowRects = overflowRects.slice(1);
         overflowHeight = sumLineHeights(overflowRects, 0, overflowRects.length);
         continue;
       }
-      remainingSpaceForDecoration = contentHeight - ofitHeight;
+      remainingSpaceForDecoration = contentHeight - overflowFittingHeight;
       entries.push({
-        height: ofitHeight,
-        lineRects: overflowRects.slice(0, ofitLast + 1),
+        height: overflowFittingHeight,
+        lineRects: overflowRects.slice(0, overflowFittingLastIndex + 1),
         decoration: null,
         split: {
-          splitAfterLine: ofitLast,
+          splitAfterLine: overflowFittingLastIndex,
           sourceProseMirrorPos: proseMirrorPos,
           splitId,
         },
       });
-      overflowRects = overflowRects.slice(ofitLast + 1);
+      overflowRects = overflowRects.slice(overflowFittingLastIndex + 1);
       overflowHeight = sumLineHeights(
         overflowRects,
         0,
@@ -274,7 +268,7 @@ export function computePageEntries(
       height: overflowHeight,
       lineRects: overflowRects,
       decoration: {
-        marginTop: remainingSpaceForDecoration + marginStack,
+        marginTop: remainingSpaceForDecoration + MARGIN_STACK,
       },
       split: { splitAfterLine, sourceProseMirrorPos: proseMirrorPos, splitId: splitId },
     });
@@ -346,43 +340,6 @@ export function resolveSplitPositions(
   }
 }
 
-const MARGIN_STACK = MARGIN_BOTTOM + PAGE_GAP + MARGIN_TOP;
-
-/**
- * Debug helper: log which paragraphs (by position, text snippet, and splitId) appear on each page.
- * Call after layout is computed; uses LayoutResult.pageStartPositions to partition the doc.
- */
-export function logParagraphsPerPage(
-  doc: ProseMirrorNode,
-  result: LayoutResult,
-  maxSnippetLen = 60
-): void {
-  const pageStarts = [1, ...result.pageStartPositions.map((p) => p.proseMirrorPos)];
-  const byPage: {
-    pageNumber: number;
-    paragraphs: { pos: number; text: string; splitId: string | null }[];
-  }[] = [];
-
-  for (let i = 0; i < pageStarts.length; i++) {
-    const start = pageStarts[i];
-    const end = pageStarts[i + 1] ?? Number.MAX_SAFE_INTEGER;
-    const paragraphs: { pos: number; text: string; splitId: string | null }[] = [];
-    doc.forEach((node, offset) => {
-      if (offset >= start && offset < end) {
-        const text = node.textContent?.slice(0, maxSnippetLen) ?? "";
-        const splitId =
-          node.type.name === "paragraph" && node.attrs.splitId != null
-            ? String(node.attrs.splitId)
-            : null;
-        paragraphs.push({ pos: offset, text: text || "(empty)", splitId });
-      }
-    });
-    byPage.push({ pageNumber: i + 1, paragraphs });
-  }
-
-  console.log("[layout] Paragraphs per page:", byPage);
-}
-
 /**
  * Build LayoutResult from the PageEntry list and the document. Walks doc in lockstep with entries.
  * Used after splits (with tr.doc) or when there are no splits (with editor.state.doc).
@@ -452,7 +409,6 @@ export function applySplitsAndDispatchLayout(
               splitId,
             });
           }
-          console.log("node", node);
           break;
         }
         offset += node.nodeSize;
@@ -466,46 +422,4 @@ export function applySplitsAndDispatchLayout(
     tr.setMeta("layoutResult", result).setMeta("addToHistory", false)
   );
   return result;
-}
-
-/**
- * Pure layout function: reads paragraph measurements, returns page break positions.
- * Whole-paragraph pushing (V1): when a paragraph doesn't fit on the current page,
- * the entire paragraph moves to the next page. Straddling paragraphs are logged
- * as candidates for future mid-paragraph splitting.
- * Paragraph spacing (PARAGRAPH_SPACING constant) is included so each paragraph reserves height + gap.
- */
-export function computeLayout(
-  measurements: ParagraphMeasurement[],
-  contentHeight: number
-): LayoutResult {
-  let pageCount = 1;
-  let accumulatedHeightOnCurrentPage = 0;
-  const pageStartPositions: PageStartPosition[] = [];
-
-  for (const p of measurements) {
-    const remainingOnPage = contentHeight - accumulatedHeightOnCurrentPage;
-    const spaceNeeded = p.totalHeight + PARAGRAPH_SPACING;
-
-    if (spaceNeeded > remainingOnPage) {
-      if (p.totalHeight > remainingOnPage) {
-        console.log("[layout] Straddling paragraph (candidate for mid-paragraph split):", {
-          pmPos: p.proseMirrorPos,
-          height: p.totalHeight,
-          remainingOnPage,
-        });
-      }
-      pageStartPositions.push({
-        proseMirrorPos: p.proseMirrorPos,
-        pageNumber: pageCount + 1,
-        remainingSpace: remainingOnPage,
-      });
-      pageCount += 1;
-      accumulatedHeightOnCurrentPage = p.totalHeight + PARAGRAPH_SPACING;
-    } else {
-      accumulatedHeightOnCurrentPage += p.totalHeight + PARAGRAPH_SPACING;
-    }
-  }
-
-  return { pageCount, pageStartPositions };
 }
