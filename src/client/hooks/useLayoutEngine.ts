@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import type { Editor } from "@tiptap/core";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
+import type { Transaction } from "@tiptap/pm/state";
 import {
   mergeSplitParagraphs,
   measureParagraphs,
   computePageEntries,
   resolveSplitPositions,
   applySplitsAndDispatchLayout,
-  logParagraphsPerPage,
 } from "../engine/layout";
 import { CONTENT_HEIGHT } from "../../shared/constants";
 
@@ -22,7 +22,6 @@ export function useLayoutEngine(editor: Editor | null): number {
   const layoutRafRef = useRef<number | null>(null);
   const firstLayoutDoneRef = useRef(false);
   const lastLayoutDocRef = useRef<ProseMirrorNode | null>(null);
-  const skipNextScheduleRef = useRef(false);
 
   useEffect(() => {
     if (!editor) return;
@@ -33,17 +32,12 @@ export function useLayoutEngine(editor: Editor | null): number {
       const pageEntries = computePageEntries(measurements, CONTENT_HEIGHT);
       resolveSplitPositions(editor, pageEntries);
 
-      skipNextScheduleRef.current = true;
       const result = applySplitsAndDispatchLayout(editor, pageEntries);
       lastLayoutDocRef.current = editor.state.doc;
       setPageCount(result.pageCount);
     };
 
     const scheduleLayout = (): void => {
-      if (skipNextScheduleRef.current) {
-        skipNextScheduleRef.current = false;
-        return;
-      }
       if (editor.state.doc === lastLayoutDocRef.current) return;
       if (layoutRafRef.current !== null) cancelAnimationFrame(layoutRafRef.current);
       layoutRafRef.current = requestAnimationFrame(() => {
@@ -59,10 +53,16 @@ export function useLayoutEngine(editor: Editor | null): number {
       });
     };
 
-    editor.on("update", scheduleLayout);
+    const handleTransaction = ({ transaction }: { transaction: Transaction }): void => {
+      if (transaction.getMeta("layoutResult") !== undefined) return;
+      if (!transaction.docChanged) return;
+      scheduleLayout();
+    };
+
+    editor.on("transaction", handleTransaction);
 
     return () => {
-      editor.off("update", scheduleLayout);
+      editor.off("transaction", handleTransaction);
       if (layoutRafRef.current !== null) {
         cancelAnimationFrame(layoutRafRef.current);
         layoutRafRef.current = null;

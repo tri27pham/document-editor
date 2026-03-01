@@ -9,6 +9,7 @@ import {
   MARGIN_TOP,
   MARGIN_BOTTOM,
   PAGE_GAP,
+  DEFAULT_LINE_HEIGHT,
 } from "../../shared/constants";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { canSplit } from "@tiptap/pm/transform";
@@ -98,6 +99,8 @@ function getLineRects(paragraphElement: HTMLElement): DOMRect[] {
  * Walk editor.state.doc in lockstep with the live DOM to collect, in a single
  * read pass: getBoundingClientRect().height, per-line rects (Range.getClientRects),
  * and ProseMirror offset for each top-level node.
+ * When the DOM node is not yet available (e.g. new paragraph from Enter), uses
+ * DEFAULT_LINE_HEIGHT and empty lineRects so pagination stays in lockstep (one entry per node).
  */
 export function measureParagraphs(editor: Editor): ParagraphMeasurement[] {
   const { doc } = editor.state;
@@ -111,6 +114,12 @@ export function measureParagraphs(editor: Editor): ParagraphMeasurement[] {
         proseMirrorPos: offset,
         totalHeight: dom.getBoundingClientRect().height,
         lineRects: getLineRects(dom),
+      });
+    } else {
+      measurements.push({
+        proseMirrorPos: offset,
+        totalHeight: DEFAULT_LINE_HEIGHT,
+        lineRects: [],
       });
     }
   });
