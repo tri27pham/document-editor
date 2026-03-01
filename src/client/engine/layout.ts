@@ -331,11 +331,19 @@ export function applySplitsAndDispatchLayout(
       const $pos = tr.doc.resolve(pos);
       const nodeBefore = $pos.nodeBefore;
       if (nodeBefore) {
-        const startBefore = pos - nodeBefore.nodeSize;
-        tr.setNodeMarkup(startBefore, undefined, {
-          ...nodeBefore.attrs,
-          splitId: uuid,
-        });
+        let startBefore: number;
+        if (nodeBefore.type.isText) {
+          startBefore = $pos.start($pos.depth - 1);
+        } else {
+          startBefore = pos - nodeBefore.nodeSize;
+        }
+        const nodeToUpdate = tr.doc.nodeAt(startBefore);
+        if (nodeToUpdate && !nodeToUpdate.type.isText) {
+          tr.setNodeMarkup(startBefore, undefined, {
+            ...nodeToUpdate.attrs,
+            splitId: uuid,
+          });
+        }
       }
     }
   }
