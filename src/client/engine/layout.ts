@@ -24,11 +24,8 @@ export function mergeSplitParagraphs(editor: Editor): boolean {
   const positionsToJoin: number[] = [];
   let docPos = 1;
   let prev: { node: ProseMirrorNode } | null = null;
-  let paragraphCount = 0;
-  let withSplitId: { splitId: unknown; index: number }[] = [];
 
   doc.forEach((node: ProseMirrorNode) => {
-    console.log("node", node);
     if (
       prev &&
       prev.node.type.name === "paragraph" &&
@@ -41,8 +38,6 @@ export function mergeSplitParagraphs(editor: Editor): boolean {
     prev = { node };
     docPos += node.nodeSize;
   });
-
-  // console.log("positionsToJoin", positionsToJoin);
 
   if (positionsToJoin.length === 0) return false;
   let tr = state.tr;
@@ -69,9 +64,6 @@ export function mergeSplitParagraphs(editor: Editor): boolean {
       }
     }
   }
-  // #region agent log
-  fetch('http://127.0.0.1:7268/ingest/2f1061ae-7d54-45f2-957d-c07d266411cf',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'648227'},body:JSON.stringify({sessionId:'648227',location:'layout.ts:mergeSplitParagraphs:dispatch',message:'dispatching merge tr',data:{joinsDone,stepsCount:tr.steps.length},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
   editor.view.dispatch(tr.setMeta("addToHistory", false));
   return true;
 }

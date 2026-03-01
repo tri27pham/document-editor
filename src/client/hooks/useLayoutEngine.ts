@@ -22,7 +22,6 @@ export function useLayoutEngine(editor: Editor | null): number {
   const layoutRafRef = useRef<number | null>(null);
   const firstLayoutDoneRef = useRef(false);
   const lastLayoutDocRef = useRef<ProseMirrorNode | null>(null);
-  /** When true, the next "update" is from our own layout dispatch (splits); skip scheduling to avoid double run. */
   const skipNextScheduleRef = useRef(false);
 
   useEffect(() => {
@@ -38,9 +37,6 @@ export function useLayoutEngine(editor: Editor | null): number {
       const result = applySplitsAndDispatchLayout(editor, pageEntries);
       lastLayoutDocRef.current = editor.state.doc;
       setPageCount(result.pageCount);
-      // if (process.env.NODE_ENV === "development") {
-      //   logParagraphsPerPage(editor.state.doc, result);
-      // }
     };
 
     const scheduleLayout = (): void => {
