@@ -9,6 +9,10 @@ export default defineConfig({
       "@": path.resolve(__dirname, "src"),
     },
   },
+  optimizeDeps: {
+    include: ["react", "react-dom", "@tiptap/core", "@tiptap/react", "@tiptap/starter-kit"],
+    holdUntilCrawlEnd: false,
+  },
   server: {
     port: 5173,
     proxy: {
