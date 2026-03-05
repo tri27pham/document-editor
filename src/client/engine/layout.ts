@@ -22,8 +22,9 @@ import { canSplit } from "@tiptap/pm/transform";
 export function mergeSplitParagraphs(editor: Editor): boolean {
   const { state } = editor;
   const { doc } = state;
+
   const positionsToJoin: number[] = [];
-  let docPos = 1;
+  let docPos = 0;
   let prev: { node: ProseMirrorNode } | null = null;
 
   doc.forEach((node: ProseMirrorNode) => {
@@ -61,7 +62,7 @@ export function mergeSplitParagraphs(editor: Editor): boolean {
           });
         }
       }
-    }
+    } 
   }
   editor.view.dispatch(tr.setMeta("addToHistory", false));
   return true;
@@ -402,11 +403,14 @@ export function applySplitsAndDispatchLayout(
       const mappedSource = entry.split.sourceProseMirrorPos;
       const splitId = entry.split.splitId!;
       if (!canSplit(tr.doc, pos, 1)) continue;
+
       tr.split(pos, 1, [
-        { type: paragraphType, attrs: { splitId } },
+        { type: paragraphType },
       ]);
 
-      let offset = 1;
+      const secondHalf = tr.doc.nodeAt(pos + 1);
+
+      let offset = 0;
       for (let j = 0; j < tr.doc.childCount; j++) {
         const node = tr.doc.child(j);
         if (offset === mappedSource) {
@@ -420,6 +424,14 @@ export function applySplitsAndDispatchLayout(
         }
         offset += node.nodeSize;
       }
+
+      if (secondHalf && secondHalf.type.name === "paragraph") {
+        tr.setNodeMarkup(pos + 1, undefined, {
+          ...secondHalf.attrs,
+          splitId,
+        });
+      }
+
     }
   }
 
