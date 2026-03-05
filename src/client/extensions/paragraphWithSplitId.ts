@@ -5,8 +5,8 @@ import Paragraph from "@tiptap/extension-paragraph";
  * Both halves of a split paragraph share the same splitId (UUID). Document order
  * identifies first half vs continuation. See docs/LINE_BY_LINE_PAGINATION.md.
  *
- * `rendered: false` keeps splitId out of the DOM — it is stored in the document
- * model and in getJSON() but not rendered as an HTML attribute.
+ * splitId is rendered as `data-split-id` on the DOM element so CSS can target
+ * split halves (e.g. zeroing margin-bottom on first halves).
  * getJSON() includes splitId when set, or omits it when null (default).
  */
 export const ParagraphWithSplitId = Paragraph.extend({
@@ -14,7 +14,13 @@ export const ParagraphWithSplitId = Paragraph.extend({
     return {
       splitId: {
         default: null,
-        rendered: false,
+        renderHTML(attributes) {
+          if (!attributes.splitId) return {};
+          return { "data-split-id": attributes.splitId };
+        },
+        parseHTML(element) {
+          return element.getAttribute("data-split-id") || null;
+        },
       },
     };
   },
