@@ -54,7 +54,7 @@ export function useLayoutEngine(editor: Editor | null): number {
     };
 
     const handleTransaction = ({ transaction }: { transaction: Transaction }): void => {
-      if (transaction.getMeta("layoutResult") !== undefined) return;
+      if (transaction.getMeta("fromLayout") !== undefined) return;
       if (!transaction.docChanged) return;
       scheduleLayout();
     };

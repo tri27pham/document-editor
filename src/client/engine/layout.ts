@@ -64,7 +64,7 @@ export function mergeSplitParagraphs(editor: Editor): boolean {
       }
     } 
   }
-  editor.view.dispatch(tr.setMeta("addToHistory", false));
+  editor.view.dispatch(tr.setMeta("addToHistory", false).setMeta("fromLayout", true));
   return true;
 }
 
@@ -289,7 +289,6 @@ export function computePageEntries(
     accumulatedHeight = overflowHeight + PARAGRAPH_SPACING;
   }
 
-  // console.log("entries", entries);
   return entries;
 }
 
@@ -338,7 +337,7 @@ export function resolveSplitPositions(
       const nextEntry = pageEntries[i + 1];
       if (nextEntry?.lineRects?.length) overflowLineRect = nextEntry.lineRects[0];
     }
-    if (!overflowLineRect) continue;
+    if (!overflowLineRect) continue; 
     const caret = getCaretPosition(
       overflowLineRect.left,
       overflowLineRect.top + 1
@@ -445,7 +444,7 @@ export function applySplitsAndDispatchLayout(
   const doc = tr.doc;
   const result = buildLayoutResultFromEntries(doc, pageEntries);
   editor.view.dispatch(
-    tr.setMeta("layoutResult", result).setMeta("addToHistory", false)
+    tr.setMeta("layoutResult", result).setMeta("addToHistory", false).setMeta("fromLayout", true)
   );
   return result;
 }
