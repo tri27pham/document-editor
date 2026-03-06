@@ -82,16 +82,21 @@ export interface ParagraphMeasurement {
 /**
  * Collect per-line client rects for a paragraph element. Works with mixed
  * inline content (bold, italic, links). Each rect's height reflects the
- * actual rendered line height. Returns a snapshot (new DOMRects) so layout
- * can use the data after the DOM read phase without holding live references.
+ * actual rendered line height (gap to next line). Returns a snapshot (new DOMRects)
+ * so layout can use the data after the DOM read phase without holding live references.
  */
 function getLineRects(paragraphElement: HTMLElement): DOMRect[] {
   const range = document.createRange();
   range.selectNodeContents(paragraphElement);
   const rects = range.getClientRects();
-  return Array.from(rects).map(
+  const result = Array.from(rects).map(
     (r) => new DOMRect(r.x, r.y, r.width, r.height)
   );
+  for (let i = 0; i < result.length - 1; i++) {
+    const gap = result[i + 1].y - result[i].y;
+    result[i] = new DOMRect(result[i].x, result[i].y, result[i].width, gap);
+  }
+  return result;
 }
 
 /**
@@ -252,11 +257,12 @@ export function computePageEntries(
         overflowHeight = sumLineHeights(overflowRects, 0, overflowRects.length);
         continue;
       }
+      const currentMarginTop = remainingSpaceForDecoration + MARGIN_STACK;
       remainingSpaceForDecoration = contentHeight - overflowFittingHeight;
       entries.push({
         height: overflowFittingHeight,
         lineRects: overflowRects.slice(0, overflowFittingLastIndex + 1),
-        decoration: null,
+        decoration: { marginTop: currentMarginTop },
         split: {
           splitAfterLine: overflowFittingLastIndex,
           sourceProseMirrorPos: proseMirrorPos,
@@ -283,6 +289,7 @@ export function computePageEntries(
     accumulatedHeight = overflowHeight + PARAGRAPH_SPACING;
   }
 
+  // console.log("entries", entries);
   return entries;
 }
 
