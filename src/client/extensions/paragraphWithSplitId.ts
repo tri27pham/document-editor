@@ -8,6 +8,10 @@ import Paragraph from "@tiptap/extension-paragraph";
  * splitId is rendered as `data-split-id` on the DOM element so CSS can target
  * split halves (e.g. zeroing margin-bottom on first halves).
  * getJSON() includes splitId when set, or omits it when null (default).
+ *
+ * When the user presses Enter, the new paragraph must not inherit splitId so the
+ * layout merge pass does not merge it back. We handle Enter by splitting the
+ * block then clearing splitId on the new paragraph (the one containing the cursor).
  */
 export const ParagraphWithSplitId = Paragraph.extend({
   addAttributes() {
@@ -21,6 +25,21 @@ export const ParagraphWithSplitId = Paragraph.extend({
         parseHTML(element) {
           return element.getAttribute("data-split-id") || null;
         },
+      },
+    };
+  },
+
+  addKeyboardShortcuts() {
+    return {
+      Enter: () => {
+        const { state } = this.editor;
+        const { $from } = state.selection;
+        if ($from.parent.type.name !== "paragraph") return false;
+        return this.editor
+          .chain()
+          .splitBlock()
+          .updateAttributes(this.name, { splitId: null })
+          .run();
       },
     };
   },
