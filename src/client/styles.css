@@ -154,6 +154,11 @@ body {
   margin-bottom: var(--paragraph-spacing, 10px);
 }
 
+/* Remove paragraph spacing between split halves — only the last half keeps its margin */
+.ProseMirror p[data-split-id]:has(+ p[data-split-id]) {
+  margin-bottom: 0;
+}
+
 .ProseMirror:focus {
   outline: none;
 }

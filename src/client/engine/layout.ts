@@ -22,8 +22,9 @@ import { canSplit } from "@tiptap/pm/transform";
 export function mergeSplitParagraphs(editor: Editor): boolean {
   const { state } = editor;
   const { doc } = state;
+
   const positionsToJoin: number[] = [];
-  let docPos = 1;
+  let docPos = 0;
   let prev: { node: ProseMirrorNode } | null = null;
 
   doc.forEach((node: ProseMirrorNode) => {
@@ -61,9 +62,9 @@ export function mergeSplitParagraphs(editor: Editor): boolean {
           });
         }
       }
-    }
+    } 
   }
-  editor.view.dispatch(tr.setMeta("addToHistory", false));
+  editor.view.dispatch(tr.setMeta("addToHistory", false).setMeta("fromLayout", true));
   return true;
 }
 
@@ -81,16 +82,21 @@ export interface ParagraphMeasurement {
 /**
  * Collect per-line client rects for a paragraph element. Works with mixed
  * inline content (bold, italic, links). Each rect's height reflects the
- * actual rendered line height. Returns a snapshot (new DOMRects) so layout
- * can use the data after the DOM read phase without holding live references.
+ * actual rendered line height (gap to next line). Returns a snapshot (new DOMRects)
+ * so layout can use the data after the DOM read phase without holding live references.
  */
 function getLineRects(paragraphElement: HTMLElement): DOMRect[] {
   const range = document.createRange();
   range.selectNodeContents(paragraphElement);
   const rects = range.getClientRects();
-  return Array.from(rects).map(
+  const result = Array.from(rects).map(
     (r) => new DOMRect(r.x, r.y, r.width, r.height)
   );
+  for (let i = 0; i < result.length - 1; i++) {
+    const gap = result[i + 1].y - result[i].y;
+    result[i] = new DOMRect(result[i].x, result[i].y, result[i].width, gap);
+  }
+  return result;
 }
 
 /**
@@ -251,11 +257,12 @@ export function computePageEntries(
         overflowHeight = sumLineHeights(overflowRects, 0, overflowRects.length);
         continue;
       }
+      const currentMarginTop = remainingSpaceForDecoration + MARGIN_STACK;
       remainingSpaceForDecoration = contentHeight - overflowFittingHeight;
       entries.push({
         height: overflowFittingHeight,
         lineRects: overflowRects.slice(0, overflowFittingLastIndex + 1),
-        decoration: null,
+        decoration: { marginTop: currentMarginTop },
         split: {
           splitAfterLine: overflowFittingLastIndex,
           sourceProseMirrorPos: proseMirrorPos,
@@ -330,7 +337,7 @@ export function resolveSplitPositions(
       const nextEntry = pageEntries[i + 1];
       if (nextEntry?.lineRects?.length) overflowLineRect = nextEntry.lineRects[0];
     }
-    if (!overflowLineRect) continue;
+    if (!overflowLineRect) continue; 
     const caret = getCaretPosition(
       overflowLineRect.left,
       overflowLineRect.top + 1
@@ -402,11 +409,14 @@ export function applySplitsAndDispatchLayout(
       const mappedSource = entry.split.sourceProseMirrorPos;
       const splitId = entry.split.splitId!;
       if (!canSplit(tr.doc, pos, 1)) continue;
+
       tr.split(pos, 1, [
-        { type: paragraphType, attrs: { splitId } },
+        { type: paragraphType },
       ]);
 
-      let offset = 1;
+      const secondHalf = tr.doc.nodeAt(pos + 1);
+
+      let offset = 0;
       for (let j = 0; j < tr.doc.childCount; j++) {
         const node = tr.doc.child(j);
         if (offset === mappedSource) {
@@ -420,13 +430,21 @@ export function applySplitsAndDispatchLayout(
         }
         offset += node.nodeSize;
       }
+
+      if (secondHalf && secondHalf.type.name === "paragraph") {
+        tr.setNodeMarkup(pos + 1, undefined, {
+          ...secondHalf.attrs,
+          splitId,
+        });
+      }
+
     }
   }
 
   const doc = tr.doc;
   const result = buildLayoutResultFromEntries(doc, pageEntries);
   editor.view.dispatch(
-    tr.setMeta("layoutResult", result).setMeta("addToHistory", false)
+    tr.setMeta("layoutResult", result).setMeta("addToHistory", false).setMeta("fromLayout", true)
   );
   return result;
 }
